@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/hardware.md`: the MPU-9250 as it actually is — two dies, access modes, endianness, scale factors, magnetometer axis rotation, chip identification.
 - `docs/architecture.md`: module map, thread/queue model, `get_avg()` contract, data path and design decisions.
 
+### Changed
+- The AK8963 now runs in **continuous measurement mode (100 Hz, 16-bit)** instead of per-sample single-measurement retriggering. 16-bit output matches the driver's 0.15 µT/LSB scale — the old 14-bit mode under-reported the field by 4×.
+- Magnetometer samples are validated against the real status registers: skipped unless `ST1.DRDY` is set, and discarded on `ST2.HOFL` magnetic overflow (replaces the vestigial checks inherited from the Go port).
+- Magnetometer readings are **remapped into the accel/gyro frame** by default (body X = mag Y, body Y = mag X, body Z = −mag Z). `MPUCalData` mag biases and the `Ms` matrix now operate in the body frame.
+- The sampling loop no longer rewrites the aux-master slave-0 configuration on every mag tick — it is set once at `initialize()`.
+
 ## [0.2.0] - 2026-07-11
 
 ### Fixed

@@ -194,6 +194,9 @@ AK89xx_FSR = 9830
 AKM_DATA_READY = 0x01
 AKM_DATA_OVERRUN = 0x02
 AKM_OVERFLOW = 0x80
+AKM_HOFL = 0x08  # AK8963 ST2: magnetic sensor overflow
+AKM_16BIT = 0x10  # AK8963 CNTL1: 16-bit output (0.15 uT/LSB)
+AKM_CONTINUOUS_100HZ = 0x06  # AK8963 CNTL1: continuous measurement mode 2
 
 # ---------- Sensitivity ---------- #
 

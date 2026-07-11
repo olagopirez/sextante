@@ -72,13 +72,15 @@ AK8963 directly at `0x0C`. The driver uses it in two places, both before samplin
 starts:
 
 - `self_check()` — reading the AK8963 `WIA` (device id) register;
-- reading the factory sensitivity values (`ASAX/Y/Z`) from the AK8963 fuse ROM.
+- reading the factory sensitivity values (`ASAX/Y/Z`) from the AK8963 fuse ROM, and
+  then starting **continuous measurement mode** (100 Hz, 16-bit) before bypass is
+  closed.
 
-**Master mode** is how sampling runs: the MPU's auxiliary I2C master is programmed
-(slave 0) to read the AK8963 data registers on every internal sample, copying the
-bytes into `EXT_SENS_DATA_00..` on the MPU, where the host reads them together with
-the gyro/accel output. Slave 1 writes `CNTL1` each sample to re-trigger a
-single-measurement conversion.
+**Master mode** is how sampling runs: the AK8963 free-runs at 100 Hz, and the MPU's
+auxiliary I2C master is programmed (slave 0) to copy `ST1..ST2` — status and data,
+8 bytes — into `EXT_SENS_DATA_00..07` on every internal sample, where the host reads
+them together with the gyro/accel output. `ST1.DRDY` tells the driver whether the
+sample is fresh; `ST2.HOFL` flags magnetic overflow (both checked per read).
 
 The two modes are mutually exclusive — mixing them up (e.g. writing `SLV0` registers
 while in bypass) silently does nothing useful, which is exactly the class of bug this
@@ -96,7 +98,7 @@ driver once had.
 | `ACCEL_CONFIG` (0x1C) | Accel full-scale range |
 | `ACCEL_CONFIG_2` (0x1D) | Accel low-pass filter, FIFO size bit |
 | `ACCEL/TEMP/GYRO_*OUT` (0x3B–0x48) | 16-bit output registers, big-endian pairs |
-| `I2C_MST_CTRL`, `I2C_SLV0/1_*`, `I2C_MST_DELAY_CTRL` | Aux master setup for the AK8963 |
+| `I2C_MST_CTRL`, `I2C_SLV0_*`, `I2C_MST_DELAY_CTRL` | Aux master setup for the AK8963 |
 | `EXT_SENS_DATA_00..07` (0x49–0x50) | Magnetometer bytes copied by the aux master |
 | `USER_CTRL` (0x6A), `INT_PIN_CFG` (0x37) | Master/bypass mode switching |
 | `FIFO_EN` (0x23), `INT_ENABLE` (0x38) | Both disabled — the driver polls |
@@ -143,17 +145,11 @@ accel/gyro axes:
 | Y | **+X** |
 | Z | **−Z** |
 
-The driver currently reports the magnetometer in its **native frame** — it does not
-remap. To express mag readings in the accel/gyro frame, set the `MPUCalData`
-rescaling matrix before `initialize()`:
-
-```python
-mpu.mpuCalDate.Ms11, mpu.mpuCalDate.Ms12 = 0.0, 1.0   # X ← mag Y
-mpu.mpuCalDate.Ms21, mpu.mpuCalDate.Ms22 = 1.0, 0.0   # Y ← mag X
-mpu.mpuCalDate.Ms33 = -1.0                            # Z ← −mag Z
-```
-
-Making this remap the default is on the roadmap.
+The driver **remaps automatically**: each sample is put into the accel/gyro (body)
+frame right after the per-axis factory sensitivity is applied, so `M1/M2/M3` in
+`MPUData` share the frame of `A*`/`G*`. Consequently the `MPUCalData` magnetometer
+biases (`M0*`) and the `Ms` rescaling matrix operate **in the body frame** — use
+them for hard-iron/soft-iron calibration, never for axis fixing.
 
 ## Identification: is your chip real?
 

@@ -49,9 +49,11 @@ Per event:
 - **accel/gyro tick** — read the six gyro/accel words and the temperature
   (big-endian), scale the freshest magnetometer values, publish an instantaneous
   `MPUData` in `mpuDate`, add everything to the running accumulators.
-- **mag tick** — point slave 0 at the AK8963 data registers, read the words the aux
-  master copied into `EXT_SENS_DATA` (little-endian), accumulate them separately.
-  The mag rate is capped at 100 Hz, the AK8963's maximum.
+- **mag tick** — read the status + data bytes the aux master copied into
+  `EXT_SENS_DATA` (`ST1`, the three little-endian words, `ST2`); skip the sample
+  unless `ST1.DRDY` says it's fresh and `ST2.HOFL` confirms no magnetic overflow,
+  then apply the per-axis factory sensitivity, remap into the accel/gyro frame and
+  accumulate. The mag rate is capped at 100 Hz, the AK8963's maximum.
 - **request** — compute the interval average, hand it back, reset the accumulators.
 
 All sampling state (accumulators, counters, timestamps) lives in **locals of the
@@ -85,9 +87,10 @@ raw register pair ──► int16 (endianness per die) ──► − hardware bi
 ```
 
 The magnetometer additionally multiplies by the per-axis factory sensitivity
-(`mcal1..3`, from the AK8963 fuse ROM) and then by the 3×3 `Ms` rescaling matrix —
-identity by default, and the hook where soft-iron correction or the axis remap
-(see [hardware.md → Axes](hardware.md#axes-the-magnetometer-frame-is-rotated)) plugs in.
+(`mcal1..3`, from the AK8963 fuse ROM) and is remapped into the accel/gyro frame
+(see [hardware.md → Axes](hardware.md#axes-the-magnetometer-frame-is-rotated)) before
+bias subtraction and the 3×3 `Ms` rescaling matrix — identity by default, the hook
+where hard-iron/soft-iron calibration plugs in.
 
 ## Design decisions
 
@@ -109,12 +112,9 @@ identity by default, and the hook where soft-iron correction or the axis remap
 
 ## Known limitations
 
-- The AK8963 `ST1`/`ST2` status checks in the mag path are vestigial (inherited from
-  the Go port) — data-ready and overflow are not reliably detected yet.
-- The magnetometer is reported in its native, rotated frame unless the user sets the
-  `Ms` matrix (see above).
 - `DT` in `MPUData` measures wall-clock interval, not sample count × period; under
   heavy CPU load the effective rate can droop silently.
 - One instance per bus is assumed, not enforced.
+- Polling caps the useful rate well below what the FIFO/interrupt path could reach.
 
 These are the roadmap items, in priority order.

@@ -16,6 +16,7 @@ The driver samples the sensor from a background thread at a configurable rate an
 - Per-interval averaging: `get_avg()` returns the average of everything sampled since the previous call.
 - Configurable accelerometer range (±2/4/8/16 g), gyro range (±250/500/1000/2000 °/s) and digital low-pass filter (derived from the sample rate).
 - Reads the AK8963 factory sensitivity adjustment (fuse ROM) at startup.
+- Magnetometer in continuous 16-bit mode (0.15 µT/LSB), validity-gated by the `ST1`/`ST2` status registers and reported in the accel/gyro frame.
 - Hardware self-check on startup: verifies `WHO_AM_I` and the AK8963 device id, catching the common relabeled/magnetometer-less boards before configuring anything.
 - User calibration hooks (`MPUCalData`): hardware biases and a magnetometer rescaling matrix.
 - Fully testable without hardware — the I2C bus is injectable.
@@ -102,7 +103,7 @@ skip it, or call `mpu.self_check()` yourself to identify a board. See
 |-------|---------|-------|
 | `G1`, `G2`, `G3` | Gyro X/Y/Z | °/s |
 | `A1`, `A2`, `A3` | Accel X/Y/Z | g |
-| `M1`, `M2`, `M3` | Magnetometer X/Y/Z | µT (after factory sensitivity adjustment) |
+| `M1`, `M2`, `M3` | Magnetometer X/Y/Z, in the accel/gyro frame | µT (after factory sensitivity adjustment) |
 | `Temp` | Die temperature | °C |
 | `N`, `NM` | Samples averaged (accel/gyro, magnetometer) | — |
 | `T`, `TM` | Timestamp of the last accel/gyro and mag sample | — |
@@ -113,7 +114,7 @@ At rest, expect `A3 ≈ 1.0` (gravity), `A1 ≈ A2 ≈ 0`, gyros ≈ 0 and `Temp
 
 ### Calibration
 
-`mpu.mpuCalDate` (`MPUCalData`) holds user calibration: per-axis hardware biases for gyro (`G0*`), accel (`A0*`) and magnetometer (`M0*`), plus a 3×3 magnetometer rescaling matrix (`Ms*`, identity by default). Set these before `initialize()` to apply your own calibration; biases are in raw LSB units.
+`mpu.mpuCalDate` (`MPUCalData`) holds user calibration: per-axis hardware biases for gyro (`G0*`), accel (`A0*`) and magnetometer (`M0*`), plus a 3×3 magnetometer rescaling matrix (`Ms*`, identity by default). Set these before `initialize()`. Gyro/accel biases are in raw LSB; the magnetometer biases and `Ms` matrix apply **in the accel/gyro frame**, after factory scaling and the axis remap — use them for hard-iron/soft-iron correction.
 
 ## Running the tests
 
@@ -131,8 +132,8 @@ pytest
 
 ## Roadmap
 
-- Magnetometer status-register (ST1/ST2) validity checks and axis alignment with the accel/gyro frame.
-- Optional continuous-measurement mode for the AK8963.
+- Interrupt/FIFO-driven sampling as an alternative to polling.
+- A tilt-compensated compass-heading example.
 
 ## Contributing
 
