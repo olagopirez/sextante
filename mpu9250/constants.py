@@ -1,4 +1,4 @@
-#!/usr/bin/python
+"""Register map and configuration bits for the MPU-9250 and its on-board AK8963 magnetometer."""
 
 MPU_ADDRESS = 0x68
 MPUREG_XG_OFFS_TC = 0x00

@@ -6,7 +6,7 @@ class MPUData:
     def __init__(self, g1=nu.float64(0.0), g2=nu.float64(0.0), g3=nu.float64(0.0),
                  a1=nu.float64(0.0), a2=nu.float64(0.0), a3=nu.float64(0.0),
                  m1=nu.float64(0.0), m2=nu.float64(0.0), m3=nu.float64(0.0),
-                 temp=nu.float64(0.0), n=1, nm=1, t=dtime.now(), tm=dtime.now(), dt=0, dtm=0,
+                 temp=nu.float64(0.0), n=1, nm=1, t=None, tm=None, dt=0, dtm=0,
                  msg_error=None):
         self.G1 = g1
         self.G2 = g2
@@ -18,8 +18,8 @@ class MPUData:
         self.M2 = m2
         self.M3 = m3
         self.Temp = temp
-        self.T = t
-        self.TM = tm
+        self.T = t if t is not None else dtime.now()
+        self.TM = tm if tm is not None else dtime.now()
         self.DT = dt
         self.DTM = dtm
         self.N = n
@@ -50,8 +50,8 @@ class MPUData:
 
 class MPUCalData:
     def __init__(self,
-                 g01=nu.float64(0.0), g02=nu.float64(0.0), g03=nu.float64(0.0),  # Accelerometer hardware bias
-                 a01=nu.float64(0.0), a02=nu.float64(0.0), a03=nu.float64(0.0),  # Gyro hardware bias
+                 g01=nu.float64(0.0), g02=nu.float64(0.0), g03=nu.float64(0.0),  # Gyro hardware bias
+                 a01=nu.float64(0.0), a02=nu.float64(0.0), a03=nu.float64(0.0),  # Accelerometer hardware bias
                  m01=nu.float64(0.0), m02=nu.float64(0.0), m03=nu.float64(0.0),  # Magnetometer hardware bias
                  ms11=nu.float64(1.0), ms12=nu.float64(0.0), ms13=nu.float64(0.0),  # Magnetometer rescaling matrix
                  ms21=nu.float64(0.0), ms22=nu.float64(1.0), ms23=nu.float64(0.0),  # (Only diagonal is used currently)
