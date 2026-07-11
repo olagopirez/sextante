@@ -3,23 +3,31 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from mpu9250 import AccelRange, GyroRange, MPUData
+from mpu9250 import AccelRange, GyroRange, HardwareMismatchError, MPUData
 from mpu9250.constants import (
     AK8963_ASAX,
     AK8963_ASAY,
     AK8963_ASAZ,
     AK8963_CNTL1,
+    AK8963_Device_ID,
     AK8963_I2C_ADDR,
+    AK8963_WIA,
     AKM_FUSE_ROM_ACCESS,
     AKM_POWER_DOWN,
     BITS_FS_8G,
     BITS_FS_500DPS,
     CFG_MOTION_BIAS,
+    MPU6050_ID,
+    MPU6500_ID,
+    MPU9250_ID,
+    MPU9255_ID,
     MPU_ADDRESS,
     MPUREG_ACCEL_CONFIG,
     MPUREG_BANK_SEL,
     MPUREG_GYRO_CONFIG,
+    MPUREG_INT_PIN_CFG,
     MPUREG_MEM_R_W,
+    MPUREG_WHOAMI,
 )
 from mpu9250.driver import _be_word_to_int16, _to_int16
 
@@ -43,6 +51,50 @@ class TestWordEndianness:
         assert _to_int16(0xFFF0) == -16
         assert _to_int16(0x8000) == -32768
         assert _to_int16(0x7FFF) == 32767
+
+
+class TestSelfCheck:
+    @staticmethod
+    def _identify_as(fake_bus, whoami, wia=AK8963_Device_ID):
+        fake_bus.byte_regs[(MPU_ADDRESS, MPUREG_WHOAMI)] = whoami
+        fake_bus.byte_regs[(AK8963_I2C_ADDR, AK8963_WIA)] = wia
+
+    def test_passes_on_a_genuine_mpu9250(self, mpu, fake_bus):
+        self._identify_as(fake_bus, MPU9250_ID)
+
+        assert mpu.self_check() == MPU9250_ID
+
+    def test_accepts_the_mpu9255_sibling(self, mpu, fake_bus):
+        self._identify_as(fake_bus, MPU9255_ID)
+
+        assert mpu.self_check() == MPU9255_ID
+
+    def test_rejects_a_relabeled_mpu6500(self, mpu, fake_bus):
+        self._identify_as(fake_bus, MPU6500_ID)
+
+        with pytest.raises(HardwareMismatchError, match='MPU-6500'):
+            mpu.self_check()
+
+    def test_rejects_an_mpu6050(self, mpu, fake_bus):
+        self._identify_as(fake_bus, MPU6050_ID)
+
+        with pytest.raises(HardwareMismatchError, match='MPU-6050'):
+            mpu.self_check()
+
+    def test_rejects_a_silent_magnetometer(self, mpu, fake_bus):
+        self._identify_as(fake_bus, MPU9250_ID, wia=0x00)
+
+        with pytest.raises(HardwareMismatchError, match='magnetometer'):
+            mpu.self_check()
+
+    def test_leaves_bypass_mode_disabled(self, mpu, fake_bus):
+        self._identify_as(fake_bus, MPU9250_ID)
+
+        mpu.self_check()
+
+        int_pin_writes = [v for a, r, v in fake_bus.byte_writes
+                          if a == MPU_ADDRESS and r == MPUREG_INT_PIN_CFG]
+        assert int_pin_writes[-1] == 0x00
 
 
 class TestRangeConfiguration:

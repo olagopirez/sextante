@@ -16,6 +16,7 @@ The driver samples the sensor from a background thread at a configurable rate an
 - Per-interval averaging: `get_avg()` returns the average of everything sampled since the previous call.
 - Configurable accelerometer range (±2/4/8/16 g), gyro range (±250/500/1000/2000 °/s) and digital low-pass filter (derived from the sample rate).
 - Reads the AK8963 factory sensitivity adjustment (fuse ROM) at startup.
+- Hardware self-check on startup: verifies `WHO_AM_I` and the AK8963 device id, catching the common relabeled/magnetometer-less boards before configuring anything.
 - User calibration hooks (`MPUCalData`): hardware biases and a magnetometer rescaling matrix.
 - Fully testable without hardware — the I2C bus is injectable.
 
@@ -29,6 +30,9 @@ mpu9250/            The package
 ├── ranges.py       Accel/gyro range definitions and LPF selection
 ├── data.py         MPUData / MPUCalData value objects
 └── ticker.py       Drift-free periodic ticker thread used by the sampling loop
+docs/
+├── hardware.md     What the MPU-9250 actually is (dies, buses, formats, identification)
+└── architecture.md How the driver works (threads, queues, data path, decisions)
 examples/
 └── read_avg.py     Prints averaged readings once per second
 tests/              Unit tests (no hardware required)
@@ -36,7 +40,7 @@ tests/              Unit tests (no hardware required)
 
 ## Requirements
 
-- Python ≥ 3.8
+- Python ≥ 3.9
 - `numpy`, `smbus2` (installed automatically)
 - On the Raspberry Pi: I2C enabled (`raspi-config` → Interface Options → I2C)
 
@@ -78,6 +82,15 @@ while True:
 
 `examples/read_avg.py` contains the same loop ready to run.
 
+### Hardware self-check
+
+`initialize()` first verifies the chip is a genuine MPU-9250/9255 with a responding
+AK8963, and raises `HardwareMismatchError` with a diagnosis otherwise (e.g. a
+relabeled MPU-6500 without magnetometer). Use `initialize(check_hardware=False)` to
+skip it, or call `mpu.self_check()` yourself to identify a board. See
+[docs/hardware.md](docs/hardware.md#identification-is-your-chip-real) for the
+`WHO_AM_I` value table.
+
 ### Reading model
 
 - `mpu.mpuDate` — most recent instantaneous sample (updated at `rate` Hz).
@@ -111,10 +124,13 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Documentation
+
+- [docs/hardware.md](docs/hardware.md) — what the MPU-9250 actually is: the two dies, buses and access modes, data formats and the endianness trap, scale factors, magnetometer axis rotation, and how to tell a genuine chip from a relabeled one.
+- [docs/architecture.md](docs/architecture.md) — how the driver works: module map, thread and queue model, the `get_avg()` contract, data path and design decisions.
+
 ## Roadmap
 
-- Architecture documentation and diagrams.
-- Hardware self-check on `initialize()` (`WHO_AM_I` / AK8963 `WIA`) to detect relabeled or magnetometer-less chips.
 - Magnetometer status-register (ST1/ST2) validity checks and axis alignment with the accel/gyro frame.
 - Optional continuous-measurement mode for the AK8963.
 
