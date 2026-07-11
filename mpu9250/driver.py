@@ -1,34 +1,52 @@
-import time
-
-import smbus2
-
-from range import *
-from MPUData import *
-from datetime import datetime
-from thread_ticker import TickerThread
+import queue
 import threading
-import Queue
+import time
+from datetime import datetime
+
+import numpy as np
+
+from .constants import *
+from .data import MPUData, MPUCalData
+from .ranges import AccelRange, GyroRange, LPF
+from .ticker import TickerThread
+
+
+def _to_int16(word):
+    # Two's complement done in plain Python: np.int16() raises OverflowError on
+    # values above 0x7FFF since NumPy 2
+    word &= 0xFFFF
+    return word - 0x10000 if word >= 0x8000 else word
+
+
+def _be_word_to_int16(word):
+    # Reassembles a big-endian register pair delivered as a little-endian SMBus word
+    return _to_int16(((word & 0xFF) << 8) | ((word >> 8) & 0xFF))
 
 
 class MPU9250:
-    mcal1 = None
-    mcal2 = None
-    mcal3 = None
-    mpuDate = MPUData()
-    mpuAvgDate = MPUData()
-    mpuCalDate = MPUCalData()
-
     def __init__(self,
                  address=MPU_ADDRESS,
                  accel_range=AccelRange.RANGE_2_G,
                  gyro_range=GyroRange.RANGE_250_DPS,
-                 rate=50):
-        self.__bus = smbus2.SMBus(1)
+                 rate=50,
+                 bus=None):
+        if bus is None:
+            import smbus2  # imported lazily so the package works without hardware
+            bus = smbus2.SMBus(1)
+
+        self.__bus = bus
         self.__mpu_address = address
         self.__accel_range = accel_range
         self.__gyro_range = gyro_range
         self.__lpf = LPF(rate=rate)
-        self.__QUEUE = Queue.Queue(maxsize=0)
+        self.__QUEUE = queue.Queue(maxsize=0)
+
+        self.mcal1 = None
+        self.mcal2 = None
+        self.mcal3 = None
+        self.mpuDate = MPUData()
+        self.mpuAvgDate = MPUData()
+        self.mpuCalDate = MPUCalData()
 
     def __write_byte(self, address, byte):
         self.__bus.write_byte_data(i2c_addr=self.__mpu_address, register=address, value=byte)
@@ -39,12 +57,11 @@ class MPU9250:
 
     def __read_word(self, register):
         # SMBus words are little-endian, which matches the AK8963 output registers
-        return np.int16(self.__bus.read_word_data(self.__mpu_address, register))
+        return _to_int16(self.__bus.read_word_data(self.__mpu_address, register))
 
     def __read_word_be(self, register):
         # MPU9250 gyro/accel/temp output registers are big-endian (high byte first)
-        word = self.__bus.read_word_data(self.__mpu_address, register)
-        return np.int16(((word & 0xFF) << 8) | ((word >> 8) & 0xFF))
+        return _be_word_to_int16(self.__bus.read_word_data(self.__mpu_address, register))
 
     def __write_ak_byte(self, address, byte):
         # Direct AK8963 access; only valid while bypass mode is enabled
@@ -55,16 +72,10 @@ class MPU9250:
         return self.__bus.read_byte_data(AK8963_I2C_ADDR, address)
 
     def set_gyro_range(self, gyro_range=GyroRange.RANGE_250_DPS):
-        if not gyro_range:
-            pass
-
         self.__gyro_range = gyro_range
         self.__write_byte(address=MPUREG_GYRO_CONFIG, byte=self.__gyro_range.get_bits())
 
     def set_accel_range(self, accel_range=AccelRange.RANGE_2_G):
-        if not accel_range:
-            pass
-
         self.__accel_range = accel_range
         self.__write_byte(address=MPUREG_ACCEL_CONFIG, byte=self.__accel_range.get_bits())
 
@@ -197,7 +208,7 @@ class MPU9250:
             self.__write_byte(address=MPUREG_I2C_SLV4_CTRL, byte=0x00)
         else:
             self.__write_byte(address=MPUREG_I2C_SLV4_CTRL,
-                              byte=np.byte(self.__lpf.get_simple_rate() / AK8963_MAX_SAMPLE_RATE - 1))
+                              byte=np.byte(self.__lpf.get_simple_rate() // AK8963_MAX_SAMPLE_RATE - 1))
 
         time.sleep(1e-1)
 
@@ -218,6 +229,7 @@ class MPU9250:
         time.sleep(5e-1)  # Make sure it's ready
 
         h = threading.Thread(target=self.__read_data)
+        h.daemon = True
         h.start()
 
     def __read_data(self):
@@ -233,17 +245,17 @@ class MPU9250:
         float_rate_mag = np.float32(100 if self.__lpf.get_rate() > 100 else self.__lpf.get_rate())
         period_mag = np.float32(int(1000.0 / float_rate_mag + 0.5)) / 1000.0
 
-        clock = TickerThread(period=period, q=Queue.Queue(maxsize=0))
-        clock_mag = TickerThread(period=period_mag, q=Queue.Queue(maxsize=0))
+        clock = TickerThread(period=period, q=queue.Queue(maxsize=0))
+        clock_mag = TickerThread(period=period_mag, q=queue.Queue(maxsize=0))
 
         clock.start()
         clock_mag.start()
 
-        combined = Queue.Queue(maxsize=0)
+        combined = queue.Queue(maxsize=0)
 
-        def listen_and_forward(queue):
+        def listen_and_forward(q):
             while True:
-                combined.put((queue, queue.get()))
+                combined.put((q, q.get()))
 
         laf = threading.Thread(target=listen_and_forward, args=(clock.get_q(),))
         laf.daemon = True
@@ -381,6 +393,6 @@ class MPU9250:
         return d
 
     def get_avg(self):
-        reply = Queue.Queue(maxsize=1)
+        reply = queue.Queue(maxsize=1)
         self.__QUEUE.put(reply)
         return reply.get()

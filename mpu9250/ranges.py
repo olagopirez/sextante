@@ -1,7 +1,13 @@
-import numpy as np
 import json
 
-from Constants import *
+import numpy as np
+
+from .constants import (
+    BITS_DLPF_CFG_5HZ, BITS_DLPF_CFG_10HZ, BITS_DLPF_CFG_20HZ,
+    BITS_DLPF_CFG_42HZ, BITS_DLPF_CFG_98HZ, BITS_DLPF_CFG_188HZ,
+    BITS_FS_2G, BITS_FS_4G, BITS_FS_8G, BITS_FS_16G,
+    BITS_FS_250DPS, BITS_FS_500DPS, BITS_FS_1000DPS, BITS_FS_2000DPS,
+)
 
 
 class _Range:
@@ -29,14 +35,10 @@ class AccelRange:
     2, 4, 8, 16, all in G (gravity).
     """
 
-    def __init__(self):
-        pass
-
     RANGE_2_G = _Range(
         bits=BITS_FS_2G,
         scale=np.float64(2) / np.float64(np.iinfo(np.int16).max)
     )
-
     RANGE_4_G = _Range(
         bits=BITS_FS_4G,
         scale=np.float64(4) / np.float64(np.iinfo(np.int16).max)
@@ -56,9 +58,6 @@ class GyroRange:
     Sets the gyro sensitivity of the MPU9250;
     it must be one of the following values: 250, 500, 1000, 2000 (all in degree/s).
     """
-
-    def __init__(self):
-        pass
 
     RANGE_250_DPS = _Range(
         bits=BITS_FS_250DPS,
@@ -80,15 +79,12 @@ class GyroRange:
 
 class LPF:
     """
-    Sets the low pass filter for the gyro.
+    Sets the low pass filter for the gyro and accelerometer.
     """
 
-    def __init__(self, rate=None):
-        if not rate:
-            pass
-
+    def __init__(self, rate=50):
         self.__rate = rate
-        simple_rate = np.byte(1000 / rate - 1)
+        simple_rate = np.byte(1000 // rate - 1)
 
         # LPF cutoff is chosen from the sample rate in Hz, not from the divider byte
         self.__gyro_bits = self.__get_gyro_rate(rate_byte=rate >> 1)
