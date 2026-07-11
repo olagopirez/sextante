@@ -12,6 +12,8 @@ from mpu9250.constants import (
     AK8963_Device_ID,
     AK8963_I2C_ADDR,
     AK8963_WIA,
+    AKM_16BIT,
+    AKM_CONTINUOUS_100HZ,
     AKM_FUSE_ROM_ACCESS,
     AKM_POWER_DOWN,
     BITS_FS_8G,
@@ -24,6 +26,11 @@ from mpu9250.constants import (
     MPU_ADDRESS,
     MPUREG_ACCEL_CONFIG,
     MPUREG_BANK_SEL,
+    MPUREG_EXT_SENS_DATA_00,
+    MPUREG_EXT_SENS_DATA_01,
+    MPUREG_EXT_SENS_DATA_03,
+    MPUREG_EXT_SENS_DATA_05,
+    MPUREG_EXT_SENS_DATA_07,
     MPUREG_GYRO_CONFIG,
     MPUREG_INT_PIN_CFG,
     MPUREG_MEM_R_W,
@@ -110,25 +117,72 @@ class TestRangeConfiguration:
         assert (MPU_ADDRESS, MPUREG_GYRO_CONFIG, BITS_FS_500DPS) in fake_bus.byte_writes
 
 
-class TestMagCalibration:
+class TestMagSetup:
     def test_reads_fuse_rom_from_the_ak8963_address(self, mpu, fake_bus):
         fake_bus.byte_regs[(AK8963_I2C_ADDR, AK8963_ASAX)] = 170
         fake_bus.byte_regs[(AK8963_I2C_ADDR, AK8963_ASAY)] = 178
         fake_bus.byte_regs[(AK8963_I2C_ADDR, AK8963_ASAZ)] = 166
 
-        mpu._MPU9250__mag_calibration()
+        mpu._MPU9250__mag_setup()
 
         scale = 9830.0 / 65536.0
         assert mpu.mcal1 == pytest.approx((170 + 128) / 256.0 * scale)
         assert mpu.mcal2 == pytest.approx((178 + 128) / 256.0 * scale)
         assert mpu.mcal3 == pytest.approx((166 + 128) / 256.0 * scale)
 
-    def test_cycles_the_ak8963_through_fuse_rom_mode(self, mpu, fake_bus):
-        mpu._MPU9250__mag_calibration()
+    def test_leaves_the_ak8963_in_continuous_16bit_mode(self, mpu, fake_bus):
+        mpu._MPU9250__mag_setup()
 
         cntl1_writes = [v for a, r, v in fake_bus.byte_writes
                         if a == AK8963_I2C_ADDR and r == AK8963_CNTL1]
-        assert cntl1_writes == [AKM_POWER_DOWN, AKM_FUSE_ROM_ACCESS, AKM_POWER_DOWN]
+        assert cntl1_writes == [AKM_POWER_DOWN, AKM_FUSE_ROM_ACCESS, AKM_POWER_DOWN,
+                                AKM_16BIT | AKM_CONTINUOUS_100HZ]
+
+
+class TestMagSampling:
+    @staticmethod
+    def _load_mag(fake_bus, hx=0, hy=0, hz=0, drdy=True, hofl=False):
+        fake_bus.byte_regs[(MPU_ADDRESS, MPUREG_EXT_SENS_DATA_00)] = 0x01 if drdy else 0x00
+        fake_bus.word_regs[(MPU_ADDRESS, MPUREG_EXT_SENS_DATA_01)] = hx & 0xFFFF
+        fake_bus.word_regs[(MPU_ADDRESS, MPUREG_EXT_SENS_DATA_03)] = hy & 0xFFFF
+        fake_bus.word_regs[(MPU_ADDRESS, MPUREG_EXT_SENS_DATA_05)] = hz & 0xFFFF
+        fake_bus.byte_regs[(MPU_ADDRESS, MPUREG_EXT_SENS_DATA_07)] = 0x08 if hofl else 0x00
+
+    def test_remaps_the_mag_axes_into_the_body_frame(self, mpu, fake_bus):
+        mpu.mcal1 = mpu.mcal2 = mpu.mcal3 = 1.0
+        self._load_mag(fake_bus, hx=100, hy=200, hz=300)
+
+        assert mpu._read_mag_sample() == (200.0, 100.0, -300.0)
+
+    def test_applies_factory_sensitivity_per_ak_axis(self, mpu, fake_bus):
+        mpu.mcal1, mpu.mcal2, mpu.mcal3 = 2.0, 3.0, 4.0
+        self._load_mag(fake_bus, hx=10, hy=20, hz=30)
+
+        m1, m2, m3 = mpu._read_mag_sample()
+
+        assert m1 == pytest.approx(20 * 3.0)   # body X = mag Y * ASAY
+        assert m2 == pytest.approx(10 * 2.0)   # body Y = mag X * ASAX
+        assert m3 == pytest.approx(-30 * 4.0)  # body Z = -mag Z * ASAZ
+
+    def test_handles_negative_little_endian_words(self, mpu, fake_bus):
+        mpu.mcal1 = mpu.mcal2 = mpu.mcal3 = 1.0
+        self._load_mag(fake_bus, hz=-16)
+
+        m1, m2, m3 = mpu._read_mag_sample()
+
+        assert m3 == pytest.approx(16.0)
+
+    def test_skips_when_data_is_not_ready(self, mpu, fake_bus):
+        mpu.mcal1 = mpu.mcal2 = mpu.mcal3 = 1.0
+        self._load_mag(fake_bus, hx=100, drdy=False)
+
+        assert mpu._read_mag_sample() is None
+
+    def test_skips_on_magnetic_overflow(self, mpu, fake_bus):
+        mpu.mcal1 = mpu.mcal2 = mpu.mcal3 = 1.0
+        self._load_mag(fake_bus, hx=100, hofl=True)
+
+        assert mpu._read_mag_sample() is None
 
 
 class TestMemWrite:

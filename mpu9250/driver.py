@@ -124,10 +124,11 @@ class MPU9250:
         self.__accel_range = accel_range
         self.__write_byte(address=MPUREG_ACCEL_CONFIG, byte=self.__accel_range.get_bits())
 
-    def __mag_calibration(self):
+    def __mag_setup(self):
         """
-        Reads the magnetometer bias values stored on the chip.
-        These values are set at the factory.
+        Reads the factory sensitivity values from the AK8963 fuse ROM and
+        leaves the magnetometer running in continuous mode (100 Hz, 16-bit)
+        for the sampling loop to consume.
         """
 
         # Enable bypass mode so the AK8963 is directly addressable on the bus
@@ -159,12 +160,43 @@ class MPU9250:
         self.__write_ak_byte(address=AK8963_CNTL1, byte=AKM_POWER_DOWN)
         time.sleep(1e-3)
 
+        # Start continuous measurements; 16-bit matches the 0.15 uT/LSB scale in mcal
+        self.__write_ak_byte(address=AK8963_CNTL1, byte=AKM_16BIT | AKM_CONTINUOUS_100HZ)
+        time.sleep(1e-3)
+
         # Disable bypass mode now that we're done getting sensitivity data
         temp = self.__read_byte(MPUREG_USER_CTRL)
         self.__write_byte(address=MPUREG_USER_CTRL, byte=temp | BIT_AUX_IF_EN)
         time.sleep(3e-3)
         self.__write_byte(address=MPUREG_INT_PIN_CFG, byte=0x00)
         time.sleep(3e-3)
+
+    def _read_mag_sample(self):
+        """
+        Reads one magnetometer sample from the EXT_SENS_DATA registers, where
+        the aux I2C master copies ST1..ST2 on every internal sample.
+
+        Returns (m1, m2, m3) with the factory sensitivity applied and remapped
+        into the accel/gyro frame, or None when the AK8963 has no fresh data
+        (ST1 DRDY clear) or the sensor overflowed (ST2 HOFL set).
+        """
+        st1 = self.__read_byte(MPUREG_EXT_SENS_DATA_00)
+        if (st1 & AKM_DATA_READY) == 0x00:
+            return None
+
+        hx = self.__read_word(MPUREG_EXT_SENS_DATA_01)
+        hy = self.__read_word(MPUREG_EXT_SENS_DATA_03)
+        hz = self.__read_word(MPUREG_EXT_SENS_DATA_05)
+        st2 = self.__read_byte(MPUREG_EXT_SENS_DATA_07)
+
+        if (st2 & AKM_HOFL) != 0x00:
+            return None
+
+        # The AK8963 axes are rotated relative to the accel/gyro frame:
+        # body X = mag Y, body Y = mag X, body Z = -mag Z
+        return (np.float64(hy) * self.mcal2,
+                np.float64(hx) * self.mcal1,
+                -np.float64(hz) * self.mcal3)
 
     def __enable_gyro_bias_cal(self, enable=False):
         """
@@ -224,8 +256,8 @@ class MPU9250:
         # Turn off interrupts
         self.__write_byte(address=MPUREG_INT_ENABLE, byte=0x00)
 
-        # --- Magnetometer --- #
-        self.__mag_calibration()
+        # --- Magnetometer: factory calibration + continuous mode --- #
+        self.__mag_setup()
 
         # Set up AK8963 master mode, master clock and ES bit
         self.__write_byte(address=MPUREG_I2C_MST_CTRL, byte=0x40)
@@ -239,18 +271,8 @@ class MPU9250:
         # Enable 8-byte reads on slave 0
         self.__write_byte(address=MPUREG_I2C_SLV0_CTRL, byte=BIT_SLAVE_EN | 8)
 
-        # Slave 1 can change AK8963 measurement mode
-        self.__write_byte(address=MPUREG_I2C_SLV1_ADDR, byte=AK8963_I2C_ADDR)
-        self.__write_byte(address=MPUREG_I2C_SLV1_REG, byte=AK8963_CNTL1)
-
-        # Enable 1-byte reads on slave 1
-        self.__write_byte(address=MPUREG_I2C_SLV1_CTRL, byte=BIT_SLAVE_EN | 1)
-
-        # Set slave 1 data
-        self.__write_byte(address=MPUREG_I2C_SLV1_DO, byte=AKM_SINGLE_MEASUREMENT)
-
-        # Triggers slave 0 and 1 actions at each sample
-        self.__write_byte(address=MPUREG_I2C_MST_DELAY_CTRL, byte=0x03)
+        # Triggers slave 0 reads at each sample
+        self.__write_byte(address=MPUREG_I2C_MST_DELAY_CTRL, byte=0x01)
 
         # Not so sure of this one--I2C Slave 4??!
         if self.__lpf.get_simple_rate() < AK8963_MAX_SAMPLE_RATE:
@@ -282,9 +304,9 @@ class MPU9250:
         h.start()
 
     def __read_data(self):
-        m1 = m2 = m3 = m4 = np.int32(0)
+        m1 = m2 = m3 = np.float64(0)
         avg1 = avg2 = avg3 = ava1 = ava2 = ava3 = avtmp = np.float64(0)
-        avm1 = avm2 = avm3 = np.int32(0)
+        avm1 = avm2 = avm3 = np.float64(0)
         n = nm = 0
         t = tm = t0 = t0m = datetime.now()
 
@@ -332,9 +354,9 @@ class MPU9250:
                 a3 = self.__read_word_be(MPUREG_ACCEL_ZOUT_H)
                 tmp = self.__read_word_be(MPUREG_TEMP_OUT_H)
 
-                mm1 = np.float64(m1) * self.mcal1 - self.mpuCalDate.M01
-                mm2 = np.float64(m2) * self.mcal2 - self.mpuCalDate.M02
-                mm3 = np.float64(m3) * self.mcal3 - self.mpuCalDate.M03
+                mm1 = m1 - self.mpuCalDate.M01
+                mm2 = m2 - self.mpuCalDate.M02
+                mm3 = m3 - self.mpuCalDate.M03
 
                 self.mpuDate = MPUData(
                     g1=(np.float64(g1) - self.mpuCalDate.G01) * self.__gyro_range.get_scale(),
@@ -358,37 +380,16 @@ class MPU9250:
                 avtmp += np.float64(tmp)
                 n += 1
             elif which is clock_mag.get_q():
+                sample = self._read_mag_sample()
+                if sample is None:
+                    continue  # data not ready, or magnetic overflow
+
                 tm = datetime.now()
-                # Set AK8963 to slave0 for reading
-                self.__write_byte(MPUREG_I2C_SLV0_ADDR, AK8963_I2C_ADDR | READ_FLAG)
+                m1, m2, m3 = sample
 
-                # I2C slave 0 register address from where to begin data transfer
-                self.__write_byte(MPUREG_I2C_SLV0_REG, AK8963_HXL)
-
-                # Tell AK8963 that we will read 7 bytes
-                self.__write_byte(MPUREG_I2C_SLV0_CTRL, 0x87)
-
-                m1 = self.__read_word(MPUREG_EXT_SENS_DATA_00)
-                m2 = self.__read_word(MPUREG_EXT_SENS_DATA_02)
-                m3 = self.__read_word(MPUREG_EXT_SENS_DATA_04)
-                m4 = self.__read_word(MPUREG_EXT_SENS_DATA_06)
-
-                # Test validity of magnetometer data
-                if (np.byte(m1 & 0xFF) & AKM_DATA_READY) == 0x00 and (np.byte(m1 & 0xFF) & AKM_DATA_OVERRUN) != 0x00:
-                    # MPU9250 mag data not ready or overflow
-                    # MPU9250 m1 LSB: %X\n", byte(m1 & 0xFF)
-                    continue  # Don't update the accumulated values
-
-                if (np.byte((m4 >> 8) & 0xFF) & AKM_OVERFLOW) != 0x00:
-                    print("MPU9250 mag data overflow")
-                    # MPU9250 mag data overflow
-                    # MPU9250 m4 MSB: %X\n", byte((m1 >> 8) & 0xFF)
-                    continue  # Don 't update the accumulated values
-
-                # Update values and increment count of magnetometer readings
-                avm1 += np.int32(m1)
-                avm2 += np.int32(m2)
-                avm3 += np.int32(m3)
+                avm1 += m1
+                avm2 += m2
+                avm3 += m3
                 nm += 1
             elif which is self.__QUEUE:
                 self.mpuAvgDate = self.__make_avg_mpu_data(
@@ -399,9 +400,9 @@ class MPU9250:
                 )
                 message.put(self.mpuAvgDate)
 
-                m1 = m2 = m3 = m4 = np.int32(0)
+                m1 = m2 = m3 = np.float64(0)
                 avg1 = avg2 = avg3 = ava1 = ava2 = ava3 = avtmp = np.float64(0)
-                avm1 = avm2 = avm3 = np.int32(0)
+                avm1 = avm2 = avm3 = np.float64(0)
                 n = nm = 0
                 t0 = t
                 t0m = tm
@@ -425,9 +426,9 @@ class MPU9250:
             d.MsgError = 'MPU9250 Error: No new accel/gyro values'
 
         if nm > 0:
-            mm1 = np.float64(avm1) * self.mcal1 / nm - self.mpuCalDate.M01
-            mm2 = np.float64(avm2) * self.mcal2 / nm - self.mpuCalDate.M02
-            mm3 = np.float64(avm3) * self.mcal3 / nm - self.mpuCalDate.M03
+            mm1 = avm1 / nm - self.mpuCalDate.M01
+            mm2 = avm2 / nm - self.mpuCalDate.M02
+            mm3 = avm3 / nm - self.mpuCalDate.M03
 
             d.M1 = self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3
             d.M2 = self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3
