@@ -1,8 +1,14 @@
-# mpu9250
+# sextante
+
+[![CI](https://github.com/olagopirez/sextante/actions/workflows/ci.yml/badge.svg)](https://github.com/olagopirez/sextante/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+
+*Sextante* — Spanish for **sextant**, the classic instrument for finding your attitude and heading from the sky.
 
 Python driver for the InvenSense **MPU-9250** 9-axis IMU — 3-axis accelerometer, 3-axis gyroscope and on-board **AK8963** 3-axis magnetometer — read over I2C, designed for the Raspberry Pi.
 
-The driver samples the sensor from a background thread at a configurable rate and lets you pull instantaneous readings or per-interval averages.
+The driver samples the sensor from a background thread at a configurable rate and lets you pull instantaneous readings or per-interval averages. The importable package keeps the hardware's name: `import mpu9250`.
 
 ## Features
 
@@ -48,8 +54,8 @@ The chip must answer at address `0x68` (`i2cdetect -y 1`). If AD0 is pulled high
 ## Installation
 
 ```bash
-git clone https://github.com/olagopirez/mpu9250.git
-cd mpu9250
+git clone https://github.com/olagopirez/sextante.git
+cd sextante
 pip install -e .
 ```
 
@@ -108,5 +114,18 @@ pytest
 ## Roadmap
 
 - Architecture documentation and diagrams.
-- Magnetometer status-register (ST1/ST2) validity checks.
+- Hardware self-check on `initialize()` (`WHO_AM_I` / AK8963 `WIA`) to detect relabeled or magnetometer-less chips.
+- Magnetometer status-register (ST1/ST2) validity checks and axis alignment with the accel/gyro frame.
 - Optional continuous-measurement mode for the AK8963.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — no hardware is needed to develop or run the tests. Please also read the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.
+
+## License
+
+[MIT](LICENSE) © Oscar Lago

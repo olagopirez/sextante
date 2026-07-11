@@ -3,12 +3,22 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mpu9250"
+name = "sextante"
 version = "0.2.0"
 description = "Driver for the InvenSense MPU-9250 9-axis IMU (accel + gyro + AK8963 magnetometer) over I2C"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
+license = { text = "MIT" }
 authors = [{ name = "Oscar Lago" }]
+keywords = ["mpu9250", "ak8963", "imu", "i2c", "raspberry-pi", "accelerometer", "gyroscope", "magnetometer"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
 dependencies = [
     "numpy",
     "smbus2",
@@ -18,7 +28,9 @@ dependencies = [
 dev = ["pytest"]
 
 [project.urls]
-Repository = "https://github.com/olagopirez/mpu9250"
+Repository = "https://github.com/olagopirez/sextante"
+Changelog = "https://github.com/olagopirez/sextante/blob/master/CHANGELOG.md"
+Issues = "https://github.com/olagopirez/sextante/issues"
 
 [tool.setuptools.packages.find]
 include = ["mpu9250*"]
