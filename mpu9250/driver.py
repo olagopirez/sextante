@@ -11,6 +11,10 @@ from .ranges import AccelRange, GyroRange, LPF
 from .ticker import TickerThread
 
 
+class HardwareMismatchError(RuntimeError):
+    """The chip answering on the bus is not the hardware this driver expects."""
+
+
 def _to_int16(word):
     # Two's complement done in plain Python: np.int16() raises OverflowError on
     # values above 0x7FFF since NumPy 2
@@ -70,6 +74,47 @@ class MPU9250:
 
     def __read_ak_byte(self, address):
         return self.__bus.read_byte_data(AK8963_I2C_ADDR, address)
+
+    def self_check(self):
+        """
+        Verifies that the chip on the bus is a genuine MPU-9250/9255 with a
+        responding AK8963 magnetometer, and returns the WHO_AM_I value.
+
+        Many boards sold as MPU-9250 carry relabeled MPU-6500 dies with no
+        magnetometer; this catches them before any configuration is written.
+
+        Raises HardwareMismatchError when either die does not identify itself.
+        """
+        whoami = self.__read_byte(MPUREG_WHOAMI)
+        if whoami not in (MPU9250_ID, MPU9255_ID):
+            hint = {
+                MPU6500_ID: 'an MPU-6500 — no magnetometer; common in relabeled boards',
+                MPU6050_ID: 'an MPU-6050',
+            }.get(whoami, 'an unknown chip')
+            raise HardwareMismatchError(
+                f'WHO_AM_I returned 0x{whoami:02X}; expected MPU-9250 (0x{MPU9250_ID:02X}) '
+                f'or MPU-9255 (0x{MPU9255_ID:02X}). This looks like {hint}.')
+
+        # The AK8963 die only answers directly while bypass mode is enabled
+        temp = self.__read_byte(MPUREG_USER_CTRL)
+        self.__write_byte(address=MPUREG_USER_CTRL, byte=temp & ~BIT_AUX_IF_EN)
+        time.sleep(3e-3)
+        self.__write_byte(address=MPUREG_INT_PIN_CFG, byte=BIT_BYPASS_EN)
+        time.sleep(3e-3)
+
+        wia = self.__read_ak_byte(AK8963_WIA)
+
+        self.__write_byte(address=MPUREG_USER_CTRL, byte=temp | BIT_AUX_IF_EN)
+        time.sleep(3e-3)
+        self.__write_byte(address=MPUREG_INT_PIN_CFG, byte=0x00)
+        time.sleep(3e-3)
+
+        if wia != AK8963_Device_ID:
+            raise HardwareMismatchError(
+                f'AK8963 WIA returned 0x{wia:02X}, expected 0x{AK8963_Device_ID:02X}: '
+                f'the magnetometer is not responding (relabeled chip or dead die).')
+
+        return whoami
 
     def set_gyro_range(self, gyro_range=GyroRange.RANGE_250_DPS):
         self.__gyro_range = gyro_range
@@ -145,13 +190,17 @@ class MPU9250:
         self.__bus.write_i2c_block_data(self.__mpu_address, MPUREG_MEM_R_W, data)
 
     # Initialization of MPU
-    def initialize(self):
+    def initialize(self, check_hardware=True):
         # Reset device.
         self.__write_byte(address=MPUREG_PWR_MGMT_1, byte=BIT_H_RESET)
 
         # Wake up chip.
         time.sleep(1e-1)
         self.__write_byte(address=MPUREG_PWR_MGMT_1, byte=0x00)
+
+        # Refuse to configure hardware that isn't what this driver expects
+        if check_hardware:
+            self.self_check()
 
         # Don't let FIFO overwrite DMP data
         self.__write_byte(address=MPUREG_ACCEL_CONFIG_2, byte=BIT_FIFO_SIZE_1024 | 0x8)
