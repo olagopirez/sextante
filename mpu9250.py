@@ -28,6 +28,7 @@ class MPU9250:
         self.__accel_range = accel_range
         self.__gyro_range = gyro_range
         self.__lpf = LPF(rate=rate)
+        self.__QUEUE = Queue.Queue(maxsize=0)
 
     def __write_byte(self, address, byte):
         self.__bus.write_byte_data(i2c_addr=self.__mpu_address, register=address, value=byte)
@@ -37,7 +38,21 @@ class MPU9250:
         return self.__bus.read_byte_data(self.__mpu_address, address)
 
     def __read_word(self, register):
+        # SMBus words are little-endian, which matches the AK8963 output registers
         return np.int16(self.__bus.read_word_data(self.__mpu_address, register))
+
+    def __read_word_be(self, register):
+        # MPU9250 gyro/accel/temp output registers are big-endian (high byte first)
+        word = self.__bus.read_word_data(self.__mpu_address, register)
+        return np.int16(((word & 0xFF) << 8) | ((word >> 8) & 0xFF))
+
+    def __write_ak_byte(self, address, byte):
+        # Direct AK8963 access; only valid while bypass mode is enabled
+        self.__bus.write_byte_data(i2c_addr=AK8963_I2C_ADDR, register=address, value=byte)
+        time.sleep(1e-3)
+
+    def __read_ak_byte(self, address):
+        return self.__bus.read_byte_data(AK8963_I2C_ADDR, address)
 
     def set_gyro_range(self, gyro_range=GyroRange.RANGE_250_DPS):
         if not gyro_range:
@@ -51,7 +66,7 @@ class MPU9250:
             pass
 
         self.__accel_range = accel_range
-        self.__write_byte(address=MPUREG_GYRO_CONFIG, byte=self.__accel_range.get_bits())
+        self.__write_byte(address=MPUREG_ACCEL_CONFIG, byte=self.__accel_range.get_bits())
 
     def __mag_calibration(self):
         """
@@ -59,38 +74,33 @@ class MPU9250:
         These values are set at the factory.
         """
 
-        # Reading chip
+        # Enable bypass mode so the AK8963 is directly addressable on the bus
         temp = self.__read_byte(MPUREG_USER_CTRL)
         self.__write_byte(address=MPUREG_USER_CTRL, byte=temp & ~BIT_AUX_IF_EN)
         time.sleep(3e-3)
         self.__write_byte(address=MPUREG_INT_PIN_CFG, byte=BIT_BYPASS_EN)
-
-        # Prepare for getting sensitivity data from AK8963
-        # Set the I2C slave address of AK8963
-        self.__write_byte(address=MPUREG_I2C_SLV0_ADDR, byte=AK8963_I2C_ADDR)
+        time.sleep(3e-3)
 
         # Power down the AK8963
-        self.__write_byte(address=MPUREG_I2C_SLV0_CTRL, byte=AK8963_CNTL1)
-        self.__write_byte(address=MPUREG_I2C_SLV0_DO, byte=AKM_POWER_DOWN)
+        self.__write_ak_byte(address=AK8963_CNTL1, byte=AKM_POWER_DOWN)
         time.sleep(1e-3)
 
         # Fuse AK8963 ROM access
-        self.__write_byte(address=MPUREG_I2C_SLV0_DO, byte=AK8963_I2CDIS)
+        self.__write_ak_byte(address=AK8963_CNTL1, byte=AKM_FUSE_ROM_ACCESS)
         time.sleep(1e-3)
 
         # Get sensitivity data from AK8963 fuse ROM
-        __mcal1 = self.__read_byte(address=AK8963_ASAX)
-        __mcal2 = self.__read_byte(address=AK8963_ASAY)
-        __mcal3 = self.__read_byte(address=AK8963_ASAZ)
+        __mcal1 = self.__read_ak_byte(address=AK8963_ASAX)
+        __mcal2 = self.__read_ak_byte(address=AK8963_ASAY)
+        __mcal3 = self.__read_ak_byte(address=AK8963_ASAZ)
 
         scale_mag = np.float64(9830) / np.float64(65536)
         self.mcal1 = np.float64(np.int16(__mcal1) + 128) / 256 * scale_mag
         self.mcal2 = np.float64(np.int16(__mcal2) + 128) / 256 * scale_mag
         self.mcal3 = np.float64(np.int16(__mcal3) + 128) / 256 * scale_mag
 
-        # Clean up from getting sensitivity data from AK8963
-        # Fuse AK8963 ROM access
-        self.__write_byte(address=MPUREG_I2C_SLV0_DO, byte=AK8963_I2CDIS)
+        # Power down the AK8963 again to leave fuse ROM access mode
+        self.__write_ak_byte(address=AK8963_CNTL1, byte=AKM_POWER_DOWN)
         time.sleep(1e-3)
 
         # Disable bypass mode now that we're done getting sensitivity data
@@ -114,13 +124,10 @@ class MPU9250:
         if data is None:
             data = []
 
-        temp = [0, 0]
-
-        temp[0] = np.byte(address >> 8)
-        temp[1] = np.byte(address >> 0xFF)
+        temp = [(address >> 8) & 0xFF, address & 0xFF]
 
         # Check memory bank boundaries
-        if temp[1] + np.byte(len(data)) > MPU_BANK_SIZE:
+        if temp[1] + len(data) > MPU_BANK_SIZE:
             raise Exception('Bad address: writing outside of memory bank boundaries')
 
         self.__bus.write_i2c_block_data(self.__mpu_address, MPUREG_BANK_SEL, temp)
@@ -245,7 +252,6 @@ class MPU9250:
         laf.daemon = True
         laf.start()
 
-        self.__QUEUE = Queue.Queue(maxsize=0)
         laf = threading.Thread(target=listen_and_forward, args=(self.__QUEUE,))
         laf.daemon = True
         laf.start()
@@ -257,13 +263,13 @@ class MPU9250:
             which, message = combined.get()
             if which is clock.get_q():
                 t = datetime.now()
-                g1 = self.__read_word(MPUREG_GYRO_XOUT_H)
-                g2 = self.__read_word(MPUREG_GYRO_YOUT_H)
-                g3 = self.__read_word(MPUREG_GYRO_ZOUT_H)
-                a1 = self.__read_word(MPUREG_ACCEL_XOUT_H)
-                a2 = self.__read_word(MPUREG_ACCEL_YOUT_H)
-                a3 = self.__read_word(MPUREG_ACCEL_ZOUT_H)
-                tmp = self.__read_word(MPUREG_TEMP_OUT_H)
+                g1 = self.__read_word_be(MPUREG_GYRO_XOUT_H)
+                g2 = self.__read_word_be(MPUREG_GYRO_YOUT_H)
+                g3 = self.__read_word_be(MPUREG_GYRO_ZOUT_H)
+                a1 = self.__read_word_be(MPUREG_ACCEL_XOUT_H)
+                a2 = self.__read_word_be(MPUREG_ACCEL_YOUT_H)
+                a3 = self.__read_word_be(MPUREG_ACCEL_ZOUT_H)
+                tmp = self.__read_word_be(MPUREG_TEMP_OUT_H)
 
                 mm1 = np.float64(m1) * self.mcal1 - self.mpuCalDate.M01
                 mm2 = np.float64(m2) * self.mcal2 - self.mpuCalDate.M02
@@ -279,7 +285,7 @@ class MPU9250:
                     m1=self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3,
                     m2=self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3,
                     m3=self.mpuCalDate.Ms31 * mm1 + self.mpuCalDate.Ms32 * mm2 + self.mpuCalDate.Ms33 * mm3,
-                    temp=np.float64(tmp) / 340 + 36.53, t=t, tm=tm, n=n, nm=nm
+                    temp=np.float64(tmp) * MPU9250T_85degC + 21, t=t, tm=tm, n=n, nm=nm
                 )
 
                 avg1 += np.float64(g1)
@@ -289,9 +295,6 @@ class MPU9250:
                 ava2 += np.float64(a2)
                 ava3 += np.float64(a3)
                 avtmp += np.float64(tmp)
-                avm1 += np.int32(m1)
-                avm2 += np.int32(m2)
-                avm3 += np.int32(m3)
                 n += 1
             elif which is clock_mag.get_q():
                 tm = datetime.now()
@@ -333,6 +336,7 @@ class MPU9250:
                     avm1=avm1, avm2=avm2, avm3=avm3,
                     avtmp=avtmp, n=n, nm=nm, t=t, tm=tm, t0=t0, t0m=t0m
                 )
+                message.put(self.mpuAvgDate)
 
                 m1 = m2 = m3 = m4 = np.int32(0)
                 avg1 = avg2 = avg3 = ava1 = ava2 = ava3 = avtmp = np.float64(0)
@@ -342,10 +346,6 @@ class MPU9250:
                 t0m = tm
 
     def __make_avg_mpu_data(self, avg1, avg2, avg3, ava1, ava2, ava3, avm1, avm2, avm3, avtmp, n, nm, t, tm, t0, t0m):
-        mm1 = np.float64(avm1) * self.mcal1 / nm - self.mpuCalDate.M01
-        mm2 = np.float64(avm2) * self.mcal2 / nm - self.mpuCalDate.M02
-        mm3 = np.float64(avm3) * self.mcal3 / nm - self.mpuCalDate.M03
-
         d = MPUData()
 
         if n > 0.5:
@@ -355,27 +355,32 @@ class MPU9250:
             d.A1 = (ava1 / n - self.mpuCalDate.A01) * self.__accel_range.get_scale()
             d.A2 = (ava2 / n - self.mpuCalDate.A02) * self.__accel_range.get_scale()
             d.A3 = (ava3 / n - self.mpuCalDate.A03) * self.__accel_range.get_scale()
-            d.Temp = (np.float64(avtmp) / np.float64(n)) / 340 + 36.53
+            d.Temp = (np.float64(avtmp) / np.float64(n)) * MPU9250T_85degC + 21
             d.N = int(n + 0.5)
             d.T = t
             timedelta = t - t0
-            d.DT = timedelta.microseconds / 1000  # ms
+            d.DT = timedelta.total_seconds() * 1000  # ms
         else:
             d.MsgError = 'MPU9250 Error: No new accel/gyro values'
 
         if nm > 0:
+            mm1 = np.float64(avm1) * self.mcal1 / nm - self.mpuCalDate.M01
+            mm2 = np.float64(avm2) * self.mcal2 / nm - self.mpuCalDate.M02
+            mm3 = np.float64(avm3) * self.mcal3 / nm - self.mpuCalDate.M03
+
             d.M1 = self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3
             d.M2 = self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3
             d.M3 = self.mpuCalDate.Ms31 * mm1 + self.mpuCalDate.Ms32 * mm2 + self.mpuCalDate.Ms33 * mm3
             d.NM = int(nm + 0.5)
             d.TM = tm
             timedeltam = tm - t0m
-            d.DTM = timedeltam.microseconds / 1000  # ms
+            d.DTM = timedeltam.total_seconds() * 1000  # ms
         else:
             d.MsgError = 'MPU9250 Error: No new magnetometer values'
 
         return d
 
     def get_avg(self):
-        self.__QUEUE.put(0)
-        return self.mpuAvgDate
+        reply = Queue.Queue(maxsize=1)
+        self.__QUEUE.put(reply)
+        return reply.get()

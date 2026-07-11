@@ -38,11 +38,11 @@ class AccelRange:
     )
 
     RANGE_4_G = _Range(
-        bits=BITS_FS_8G,
+        bits=BITS_FS_4G,
         scale=np.float64(4) / np.float64(np.iinfo(np.int16).max)
     )
     RANGE_8_G = _Range(
-        bits=BITS_FS_16G,
+        bits=BITS_FS_8G,
         scale=np.float64(8) / np.float64(np.iinfo(np.int16).max)
     )
     RANGE_16_G = _Range(
@@ -90,8 +90,9 @@ class LPF:
         self.__rate = rate
         simple_rate = np.byte(1000 / rate - 1)
 
-        self.__gyro_bits = self.__get_gyro_rate(rate_byte=simple_rate >> 1)
-        self.__accel_bits = self.__get_accel_rate(rate_byte=simple_rate >> 1)
+        # LPF cutoff is chosen from the sample rate in Hz, not from the divider byte
+        self.__gyro_bits = self.__get_gyro_rate(rate_byte=rate >> 1)
+        self.__accel_bits = self.__get_accel_rate(rate_byte=rate >> 1)
 
         self.__simple_rate = simple_rate
 
