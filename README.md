@@ -127,6 +127,7 @@ pytest
 
 ## Documentation
 
+- **Website:** [olagopirez.github.io/sextante](https://olagopirez.github.io/sextante/) — project landing page (source in [`site/`](site/), deployed to GitHub Pages on every push to `master`).
 - [docs/hardware.md](docs/hardware.md) — what the MPU-9250 actually is: the two dies, buses and access modes, data formats and the endianness trap, scale factors, magnetometer axis rotation, and how to tell a genuine chip from a relabeled one.
 - [docs/architecture.md](docs/architecture.md) — how the driver works: module map, thread and queue model, the `get_avg()` contract, data path and design decisions.
 
