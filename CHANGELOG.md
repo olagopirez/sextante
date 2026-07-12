@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardware self-check on `initialize()`: verifies `WHO_AM_I` (MPU-9250/9255) and the AK8963 `WIA` device id, raising `HardwareMismatchError` with a diagnosis for relabeled or magnetometer-less chips. Skippable with `initialize(check_hardware=False)`; also exposed as `MPU9250.self_check()`.
 - `docs/hardware.md`: the MPU-9250 as it actually is — two dies, access modes, endianness, scale factors, magnetometer axis rotation, chip identification.
 - `docs/architecture.md`: module map, thread/queue model, `get_avg()` contract, data path and design decisions.
+- Project website (`site/`, Astro + Three.js) with an interactive 3D scene — a stylized Pi board and the body-frame IMU cube, draggable and drivable by a phone's real IMU — deployed to GitHub Pages on every push to `master`.
 
 ### Changed
 - The AK8963 now runs in **continuous measurement mode (100 Hz, 16-bit)** instead of per-sample single-measurement retriggering. 16-bit output matches the driver's 0.15 µT/LSB scale — the old 14-bit mode under-reported the field by 4×.

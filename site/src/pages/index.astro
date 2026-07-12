@@ -1,0 +1,228 @@
+---
+const GH = 'https://github.com/olagopirez/sextante';
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sextante — MPU-9250 driver for Raspberry Pi</title>
+  <meta name="description" content="Attitude and heading from a 9-axis IMU. A Python driver for the InvenSense MPU-9250 on the Raspberry Pi — tested without hardware, documented down to the silicon." />
+  <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}/favicon.svg`} />
+  <meta property="og:title" content="sextante" />
+  <meta property="og:description" content="Attitude and heading from a 9-axis IMU. Python driver for the MPU-9250 on the Raspberry Pi." />
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">⛵ sextante</span>
+    <nav>
+      <a href="#quickstart">Quick start</a>
+      <a href={`${GH}/blob/master/docs/hardware.md`}>Hardware</a>
+      <a href={`${GH}/blob/master/docs/architecture.md`}>Architecture</a>
+      <a href={GH} class="gh">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>sextante</h1>
+        <p class="tagline">Attitude and heading from a 9-axis IMU.</p>
+        <p class="sub">
+          A Python driver for the InvenSense <strong>MPU-9250</strong> — accelerometer,
+          gyroscope and AK8963 magnetometer over I2C on the Raspberry Pi.
+          Tested without hardware. Documented down to the silicon.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="#quickstart">Quick start</a>
+          <a class="btn" href={GH}>View on GitHub</a>
+        </div>
+      </div>
+      <div class="hero-scene">
+        <canvas id="scene"></canvas>
+        <p class="scene-hint">
+          Drag the cube — those are the body-frame axes the driver reports.
+          <button id="imu-btn" hidden>Use my phone's IMU</button>
+        </p>
+      </div>
+    </section>
+
+    <section class="features">
+      <h2>Nine axes, done right</h2>
+      <div class="grid">
+        <article>
+          <h3>Real magnetometer data</h3>
+          <p>The AK8963 runs in continuous 16-bit mode (0.15 µT/LSB); every sample is
+          validity-gated by the ST1/ST2 status registers. Actual microteslas, not noise.</p>
+        </article>
+        <article>
+          <h3>Hardware self-check</h3>
+          <p><code>WHO_AM_I</code> and the magnetometer id are verified before configuring
+          anything — relabeled MPU-6500 boards get diagnosed, not silently tolerated.</p>
+        </article>
+        <article>
+          <h3>One frame for everything</h3>
+          <p>Magnetometer readings are remapped into the accel/gyro body frame, so heading
+          and fusion math get consistent axes out of the box.</p>
+        </article>
+        <article>
+          <h3>Background sampling</h3>
+          <p>A drift-free ticker samples at your rate; <code>get_avg()</code> synchronously
+          returns the average of everything since the previous call.</p>
+        </article>
+        <article>
+          <h3>Test without hardware</h3>
+          <p>The I2C bus is injectable — the whole test suite runs against an in-memory
+          fake, on any machine, in under a second.</p>
+        </article>
+        <article>
+          <h3>Documented internals</h3>
+          <p>Two dies, two byte orders, two access modes — the
+          <a href={`${GH}/blob/master/docs/hardware.md`}>hardware doc</a> explains the chip
+          the datasheets assume you already understand.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="quickstart" class="quickstart">
+      <h2>Quick start</h2>
+      <pre><code><span class="c"># On the Raspberry Pi (I2C enabled)</span>
+git clone {GH}.git
+cd sextante
+pip install -e .</code></pre>
+      <pre><code><span class="k">import</span> time
+<span class="k">from</span> mpu9250 <span class="k">import</span> MPU9250
+
+mpu = MPU9250(rate=<span class="n">50</span>)
+mpu.initialize()   <span class="c"># self-checks the chip, calibrates, starts sampling</span>
+
+<span class="k">while</span> <span class="k">True</span>:
+    time.sleep(<span class="n">1</span>)
+    print(mpu.get_avg().get_json())   <span class="c"># °/s, g, µT, °C</span></code></pre>
+      <p class="hint">At rest you should see <code>A3 ≈ 1.0</code> (gravity), gyros ≈ 0 and a
+      realistic temperature — a five-second wiring sanity check.</p>
+    </section>
+
+    <section class="whoami">
+      <h2>Is your chip real?</h2>
+      <p>The MPU-9250 is discontinued and heavily counterfeited. <code>self_check()</code>
+      reads <code>WHO_AM_I</code> and tells you what you actually own:</p>
+      <table>
+        <thead><tr><th><code>WHO_AM_I</code></th><th>Chip</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td><code>0x71</code></td><td>MPU-9250</td><td>✅ genuine</td></tr>
+          <tr><td><code>0x73</code></td><td>MPU-9255</td><td>✅ works fine</td></tr>
+          <tr><td><code>0x70</code></td><td>MPU-6500</td><td>⚠️ relabel — no magnetometer</td></tr>
+          <tr><td><code>0x68</code></td><td>MPU-6050</td><td>❌ different part</td></tr>
+        </tbody>
+      </table>
+      <p><a href={`${GH}/blob/master/docs/hardware.md#identification-is-your-chip-real`}>
+      The full story of the two dies →</a></p>
+    </section>
+  </main>
+
+  <footer>
+    <p>MIT © Oscar Lago · <a href={GH}>github.com/olagopirez/sextante</a></p>
+  </footer>
+
+  <script>
+    import { initScene } from '../scripts/scene.js';
+    initScene(document.getElementById('scene'), document.getElementById('imu-btn'));
+  </script>
+
+  <style is:global>
+    :root {
+      --bg: #0b1220;
+      --panel: #101a2d;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #dbe4f0;
+      --muted: #8fa3bd;
+      --accent: #2dd4bf;
+      --accent-dim: rgba(45, 212, 191, 0.12);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 600px at 75% -10%, #12233f 0%, var(--bg) 55%);
+      color: var(--text);
+      font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 0.92em; }
+
+    .nav {
+      display: flex; justify-content: space-between; align-items: center;
+      max-width: 1080px; margin: 0 auto; padding: 18px 24px;
+    }
+    .brand { font-weight: 700; letter-spacing: 0.02em; }
+    .nav nav { display: flex; gap: 20px; flex-wrap: wrap; }
+    .nav a { color: var(--muted); font-size: 0.95em; }
+    .nav a.gh, .nav a:hover { color: var(--text); }
+
+    main { max-width: 1080px; margin: 0 auto; padding: 0 24px 60px; }
+
+    .hero {
+      display: grid; grid-template-columns: 1fr 1.1fr; gap: 24px;
+      align-items: center; min-height: 480px; padding: 30px 0 10px;
+    }
+    .hero h1 { font-size: 3.4em; margin: 0; letter-spacing: -0.02em; }
+    .tagline { font-size: 1.35em; color: var(--accent); margin: 6px 0 14px; }
+    .sub { color: var(--muted); max-width: 42ch; }
+    .cta { display: flex; gap: 12px; margin-top: 22px; }
+    .btn {
+      padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border);
+      color: var(--text); background: var(--panel);
+    }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #06251f; font-weight: 600; }
+    .btn:hover { text-decoration: none; filter: brightness(1.12); }
+
+    .hero-scene { position: relative; }
+    #scene { width: 100%; height: 420px; display: block; cursor: grab; }
+    #scene:active { cursor: grabbing; }
+    .scene-hint { text-align: center; color: var(--muted); font-size: 0.85em; margin-top: 2px; }
+    #imu-btn {
+      margin-left: 8px; padding: 4px 10px; border-radius: 6px;
+      background: var(--accent-dim); color: var(--accent);
+      border: 1px solid var(--accent); font-size: 0.95em; cursor: pointer;
+    }
+
+    section { margin-top: 70px; }
+    h2 { font-size: 1.9em; letter-spacing: -0.01em; }
+
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .grid article {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 18px 20px;
+    }
+    .grid h3 { margin: 0 0 8px; font-size: 1.05em; color: var(--accent); }
+    .grid p { margin: 0; color: var(--muted); font-size: 0.95em; }
+
+    pre {
+      background: #0d1526; border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px 20px; overflow-x: auto; line-height: 1.55;
+    }
+    pre .c { color: #5c718c; }
+    pre .k { color: #7dd3fc; }
+    pre .n { color: #fbbf24; }
+    .hint { color: var(--muted); font-size: 0.95em; }
+
+    table { border-collapse: collapse; width: 100%; max-width: 560px; }
+    th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+
+    footer {
+      border-top: 1px solid var(--border); margin-top: 70px;
+      padding: 26px 24px; text-align: center; color: var(--muted); font-size: 0.9em;
+    }
+
+    @media (max-width: 860px) {
+      .hero { grid-template-columns: 1fr; min-height: 0; }
+      #scene { height: 320px; }
+      .grid { grid-template-columns: 1fr; }
+      .hero h1 { font-size: 2.6em; }
+    }
+  </style>
+</body>
+</html>
