@@ -141,6 +141,7 @@ const cctx = cubeCanvas.getContext('2d');
 const V = [];
 for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) V.push([x*0.62, y*0.62, z*0.62]);
 const EDGES = [[0,1],[0,2],[0,4],[1,3],[1,5],[2,3],[2,6],[3,7],[4,5],[4,6],[5,7],[6,7]];
+const FACES = [[0,1,3,2],[4,5,7,6],[0,1,5,4],[2,3,7,6],[0,2,6,4],[1,3,7,5]];
 const AXES = [
   { v: [1.15, 0, 0], color: '#ff5f5f', label: 'X' },
   { v: [0, 1.15, 0], color: '#4ade80', label: 'Y' },
@@ -152,10 +153,12 @@ let attitude = [1, 0, 0, 0];
 let shownQ = [1, 0, 0, 0];
 
 function project(v, w, h) {
-  // body → world → camera; screen x right, y up; depth along camera y
+  // body → world → camera; screen x right, y up; depth along camera y.
+  // The camera sits far relative to the cube so the perspective stays gentle
+  // and the wireframe still reads as a cube, not a frustum.
   const p = qrot(CAMERA_TILT, qrot(shownQ, v));
-  const persp = 3.2 / (3.2 + p[1]);
-  const s = Math.min(w, h) * 0.30;
+  const persp = 7.0 / (7.0 + p[1]);
+  const s = Math.min(w, h) * 0.34;
   return [w/2 + p[0]*s*persp, h/2 - p[2]*s*persp, persp];
 }
 
@@ -189,12 +192,32 @@ function drawCube() {
   for (let i = 0; i < 4; i++) shownQ[i] /= n;
 
   const pts = V.map(v => project(v, w, h));
+
+  // depth cue normalized per frame: 0 = farthest vertex, 1 = nearest
+  let near = -Infinity, far = Infinity;
+  for (const p of pts) { if (p[2] > near) near = p[2]; if (p[2] < far) far = p[2]; }
+  const depth = d => (d - far) / Math.max(near - far, 1e-6);
+
   cctx.save();
+
+  // translucent faces, painted far to near, so it reads as a solid volume
+  const faces = FACES
+    .map(f => ({ f, d: (pts[f[0]][2] + pts[f[1]][2] + pts[f[2]][2] + pts[f[3]][2]) / 4 }))
+    .sort((a, b) => a.d - b.d);
+  cctx.fillStyle = 'rgba(53,224,255,0.05)';
+  for (const { f } of faces) {
+    cctx.beginPath();
+    cctx.moveTo(pts[f[0]][0], pts[f[0]][1]);
+    for (let k = 1; k < 4; k++) cctx.lineTo(pts[f[k]][0], pts[f[k]][1]);
+    cctx.closePath();
+    cctx.fill();
+  }
+
   cctx.strokeStyle = '#35e0ff';
   cctx.shadowColor = '#35e0ff';
   cctx.shadowBlur = 10;
   for (const [i, j] of EDGES) {
-    cctx.globalAlpha = 0.45 + 0.55 * Math.min(pts[i][2], pts[j][2]);
+    cctx.globalAlpha = 0.4 + 0.6 * Math.min(depth(pts[i][2]), depth(pts[j][2]));
     cctx.lineWidth = 1.4;
     cctx.beginPath();
     cctx.moveTo(pts[i][0], pts[i][1]);
