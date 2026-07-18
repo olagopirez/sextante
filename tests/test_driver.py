@@ -280,3 +280,54 @@ class TestGyroCalibration:
 
         assert first > 0
         assert float(mpu.mpuCalDate.G01) == pytest.approx(2 * first, rel=1e-6)
+
+
+class TestMounting:
+    def test_parses_quarter_turn_specs(self):
+        from mpu9250.driver import _mount_matrix
+        assert _mount_matrix('x180') == ((1, 0, 0), (0, -1, 0), (0, 0, -1))
+        assert _mount_matrix('z90') == ((0, -1, 0), (1, 0, 0), (0, 0, 1))
+        # composition: x180 then z90
+        assert _mount_matrix('x180,z90') == ((0, 1, 0), (1, 0, 0), (0, 0, -1))
+
+    def test_rejects_bad_specs(self):
+        from mpu9250.driver import _mount_matrix
+        with pytest.raises(ValueError):
+            _mount_matrix('x45')
+        with pytest.raises(ValueError):
+            _mount_matrix('q180')
+
+    def test_avg_data_is_rotated_into_the_vehicle_frame(self, fake_bus):
+        from mpu9250 import MPU9250
+        mpu = MPU9250(bus=fake_bus, mount='x180')
+        mpu.mcal1 = mpu.mcal2 = mpu.mcal3 = 1.0
+        t0 = datetime(2026, 7, 18, 12, 0, 0)
+        t = datetime(2026, 7, 18, 12, 0, 1)
+
+        d = mpu._MPU9250__make_avg_mpu_data(
+            avg1=32767.0 * 10, avg2=32767.0 * 10, avg3=32767.0 * 10,
+            ava1=0.0, ava2=0.0, ava3=-16384.0 * 10,   # chip reads gravity on -Z
+            avm1=100 * 5, avm2=200 * 5, avm3=300 * 5,
+            avtmp=0.0, n=10, nm=5, t=t, tm=t, t0=t0, t0m=t0,
+        )
+
+        assert d.G1 == pytest.approx(250.0)
+        assert d.G2 == pytest.approx(-250.0)   # y and z flip under x180
+        assert d.G3 == pytest.approx(-250.0)
+        assert d.A3 == pytest.approx(16384.0 * 2 / 32767.0)  # gravity now +Z: level
+        assert d.M1 == pytest.approx(100.0)
+        assert d.M2 == pytest.approx(-200.0)
+        assert d.M3 == pytest.approx(-300.0)
+
+    def test_calibration_folds_bias_back_into_the_chip_frame(self, fake_bus):
+        from mpu9250 import MPU9250
+        mpu = MPU9250(bus=fake_bus, mount='x180')
+        mpu.mpuDate = MPUData(g1=1.0, g2=2.0, g3=3.0)  # vehicle frame
+
+        bias = mpu.calibrate_gyro(duration=0.05)
+
+        assert bias == pytest.approx((1.0, 2.0, 3.0))
+        scale = 250.0 / 32767.0
+        assert float(mpu.mpuCalDate.G01) == pytest.approx(1.0 / scale)
+        assert float(mpu.mpuCalDate.G02) == pytest.approx(-2.0 / scale)
+        assert float(mpu.mpuCalDate.G03) == pytest.approx(-3.0 / scale)

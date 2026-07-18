@@ -159,6 +159,11 @@ makes the attitude wander at rest. Every command measures and removes it at star
 keep the device still for the first 2 seconds (tune with `--calibrate 5`, skip with
 `--calibrate 0`; also available as `MPU9250.calibrate_gyro()`).
 
+**Mounting**: if the chip sits rotated or upside down on your board (the Stratux AHRS
+mounts it Z-down), pass `--mount x180` (any comma list of quarter turns, e.g.
+`x180,z90`) and gyro/accel/mag are rotated into the vehicle frame — the viewer then
+shows the *board* level when it is level.
+
 **Barometer**: when a BMP280/BME280 answers on the bus (the Stratux AHRS board pairs
 one with the MPU-9250), every command picks it up automatically — pressure/altitude
 columns in the CSV, `PRESS`/`ALT` in the live viewer, altitude statistics and range in

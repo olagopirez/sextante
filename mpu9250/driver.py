@@ -27,13 +27,49 @@ def _be_word_to_int16(word):
     return _to_int16(((word & 0xFF) << 8) | ((word >> 8) & 0xFF))
 
 
+# Quarter-turn rotation matrices (rows), exact in integers
+_MOUNT_TURNS = {
+    ('x', 90): ((1, 0, 0), (0, 0, -1), (0, 1, 0)),
+    ('x', 180): ((1, 0, 0), (0, -1, 0), (0, 0, -1)),
+    ('x', 270): ((1, 0, 0), (0, 0, 1), (0, -1, 0)),
+    ('y', 90): ((0, 0, 1), (0, 1, 0), (-1, 0, 0)),
+    ('y', 180): ((-1, 0, 0), (0, 1, 0), (0, 0, -1)),
+    ('y', 270): ((0, 0, -1), (0, 1, 0), (1, 0, 0)),
+    ('z', 90): ((0, -1, 0), (1, 0, 0), (0, 0, 1)),
+    ('z', 180): ((-1, 0, 0), (0, -1, 0), (0, 0, 1)),
+    ('z', 270): ((0, 1, 0), (-1, 0, 0), (0, 0, 1)),
+}
+
+
+def _mount_matrix(spec):
+    """
+    Parses a mounting spec like ``'x180'`` or ``'x180,z90'`` — a sequence of
+    quarter turns describing how the chip sits relative to the vehicle — into
+    a 3x3 rotation matrix.
+    """
+    matrix = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
+    for token in spec.split(','):
+        token = token.strip().lower()
+        axis, angle = token[:1], token[1:]
+        key = (axis, int(angle)) if angle.isdigit() else None
+        if key not in _MOUNT_TURNS:
+            raise ValueError(
+                f"bad mount token '{token}': use axis x/y/z + 90/180/270, e.g. 'x180' or 'x180,z90'")
+        turn = _MOUNT_TURNS[key]
+        matrix = tuple(
+            tuple(sum(turn[i][k] * matrix[k][j] for k in range(3)) for j in range(3))
+            for i in range(3))
+    return matrix
+
+
 class MPU9250:
     def __init__(self,
                  address=MPU_ADDRESS,
                  accel_range=AccelRange.RANGE_2_G,
                  gyro_range=GyroRange.RANGE_250_DPS,
                  rate=50,
-                 bus=None):
+                 bus=None,
+                 mount=None):
         if bus is None:
             import smbus2  # imported lazily so the package works without hardware
             bus = smbus2.SMBus(1)
@@ -43,6 +79,7 @@ class MPU9250:
         self.__accel_range = accel_range
         self.__gyro_range = gyro_range
         self.__lpf = LPF(rate=rate)
+        self.__mount = _mount_matrix(mount) if mount else None
         self.__QUEUE = queue.Queue(maxsize=0)
 
         self.mcal1 = None
@@ -58,6 +95,15 @@ class MPU9250:
 
     def __read_byte(self, address):
         return self.__bus.read_byte_data(self.__mpu_address, address)
+
+    def __remount(self, v1, v2, v3):
+        # Chip body frame → vehicle frame, applied after all calibration
+        if self.__mount is None:
+            return v1, v2, v3
+        m = self.__mount
+        return (m[0][0] * v1 + m[0][1] * v2 + m[0][2] * v3,
+                m[1][0] * v1 + m[1][1] * v2 + m[1][2] * v3,
+                m[2][0] * v1 + m[2][1] * v2 + m[2][2] * v3)
 
     def __read_word(self, register):
         # SMBus words are little-endian, which matches the AK8963 output registers
@@ -358,16 +404,23 @@ class MPU9250:
                 mm2 = m2 - self.mpuCalDate.M02
                 mm3 = m3 - self.mpuCalDate.M03
 
+                gs = self.__gyro_range.get_scale()
+                acs = self.__accel_range.get_scale()
+                gv = self.__remount((np.float64(g1) - self.mpuCalDate.G01) * gs,
+                                    (np.float64(g2) - self.mpuCalDate.G02) * gs,
+                                    (np.float64(g3) - self.mpuCalDate.G03) * gs)
+                av = self.__remount((np.float64(a1) - self.mpuCalDate.A01) * acs,
+                                    (np.float64(a2) - self.mpuCalDate.A02) * acs,
+                                    (np.float64(a3) - self.mpuCalDate.A03) * acs)
+                mv = self.__remount(
+                    self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3,
+                    self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3,
+                    self.mpuCalDate.Ms31 * mm1 + self.mpuCalDate.Ms32 * mm2 + self.mpuCalDate.Ms33 * mm3)
+
                 self.mpuDate = MPUData(
-                    g1=(np.float64(g1) - self.mpuCalDate.G01) * self.__gyro_range.get_scale(),
-                    g2=(np.float64(g2) - self.mpuCalDate.G02) * self.__gyro_range.get_scale(),
-                    g3=(np.float64(g3) - self.mpuCalDate.G03) * self.__gyro_range.get_scale(),
-                    a1=(np.float64(a1) - self.mpuCalDate.A01) * self.__accel_range.get_scale(),
-                    a2=(np.float64(a2) - self.mpuCalDate.A02) * self.__accel_range.get_scale(),
-                    a3=(np.float64(a3) - self.mpuCalDate.A03) * self.__accel_range.get_scale(),
-                    m1=self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3,
-                    m2=self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3,
-                    m3=self.mpuCalDate.Ms31 * mm1 + self.mpuCalDate.Ms32 * mm2 + self.mpuCalDate.Ms33 * mm3,
+                    g1=gv[0], g2=gv[1], g3=gv[2],
+                    a1=av[0], a2=av[1], a3=av[2],
+                    m1=mv[0], m2=mv[1], m3=mv[2],
                     temp=np.float64(tmp) * MPU9250T_85degC + 21, t=t, tm=tm, n=n, nm=nm
                 )
 
@@ -411,12 +464,14 @@ class MPU9250:
         d = MPUData()
 
         if n > 0.5:
-            d.G1 = (avg1 / n - self.mpuCalDate.G01) * self.__gyro_range.get_scale()
-            d.G2 = (avg2 / n - self.mpuCalDate.G02) * self.__gyro_range.get_scale()
-            d.G3 = (avg3 / n - self.mpuCalDate.G03) * self.__gyro_range.get_scale()
-            d.A1 = (ava1 / n - self.mpuCalDate.A01) * self.__accel_range.get_scale()
-            d.A2 = (ava2 / n - self.mpuCalDate.A02) * self.__accel_range.get_scale()
-            d.A3 = (ava3 / n - self.mpuCalDate.A03) * self.__accel_range.get_scale()
+            gs = self.__gyro_range.get_scale()
+            acs = self.__accel_range.get_scale()
+            d.G1, d.G2, d.G3 = self.__remount((avg1 / n - self.mpuCalDate.G01) * gs,
+                                              (avg2 / n - self.mpuCalDate.G02) * gs,
+                                              (avg3 / n - self.mpuCalDate.G03) * gs)
+            d.A1, d.A2, d.A3 = self.__remount((ava1 / n - self.mpuCalDate.A01) * acs,
+                                              (ava2 / n - self.mpuCalDate.A02) * acs,
+                                              (ava3 / n - self.mpuCalDate.A03) * acs)
             d.Temp = (np.float64(avtmp) / np.float64(n)) * MPU9250T_85degC + 21
             d.N = int(n + 0.5)
             d.T = t
@@ -430,9 +485,10 @@ class MPU9250:
             mm2 = avm2 / nm - self.mpuCalDate.M02
             mm3 = avm3 / nm - self.mpuCalDate.M03
 
-            d.M1 = self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3
-            d.M2 = self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3
-            d.M3 = self.mpuCalDate.Ms31 * mm1 + self.mpuCalDate.Ms32 * mm2 + self.mpuCalDate.Ms33 * mm3
+            d.M1, d.M2, d.M3 = self.__remount(
+                self.mpuCalDate.Ms11 * mm1 + self.mpuCalDate.Ms12 * mm2 + self.mpuCalDate.Ms13 * mm3,
+                self.mpuCalDate.Ms21 * mm1 + self.mpuCalDate.Ms22 * mm2 + self.mpuCalDate.Ms23 * mm3,
+                self.mpuCalDate.Ms31 * mm1 + self.mpuCalDate.Ms32 * mm2 + self.mpuCalDate.Ms33 * mm3)
             d.NM = int(nm + 0.5)
             d.TM = tm
             timedeltam = tm - t0m
@@ -471,8 +527,18 @@ class MPU9250:
             return (0.0, 0.0, 0.0)
 
         bias = (sums[0] / n, sums[1] / n, sums[2] / n)
+
+        # Readings are vehicle-frame; the stored bias lives in the chip frame,
+        # so un-rotate with the mount transpose (= inverse for a rotation)
+        chip = bias
+        if self.__mount is not None:
+            m = self.__mount
+            chip = (m[0][0] * bias[0] + m[1][0] * bias[1] + m[2][0] * bias[2],
+                    m[0][1] * bias[0] + m[1][1] * bias[1] + m[2][1] * bias[2],
+                    m[0][2] * bias[0] + m[1][2] * bias[1] + m[2][2] * bias[2])
+
         scale = self.__gyro_range.get_scale()
-        self.mpuCalDate.G01 += bias[0] / scale
-        self.mpuCalDate.G02 += bias[1] / scale
-        self.mpuCalDate.G03 += bias[2] / scale
+        self.mpuCalDate.G01 += chip[0] / scale
+        self.mpuCalDate.G02 += chip[1] / scale
+        self.mpuCalDate.G03 += chip[2] / scale
         return bias
