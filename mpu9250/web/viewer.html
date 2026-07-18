@@ -158,10 +158,12 @@ let shownQ = [1, 0, 0, 0];
 
 function project(v, w, h) {
   // body → world → camera; screen x right, y up; depth along camera y.
-  // The camera sits far relative to the cube so the perspective stays gentle
-  // and the wireframe still reads as a cube, not a frustum.
+  // Near-orthographic on purpose: any close camera bends the cube into a
+  // frustum on screen (corner depths differ by ~2 units), and a HUD wants a
+  // rigid technical drawing — the depth-cued edge alpha carries the 3D
+  // reading instead of size.
   const p = qrot(CAMERA_TILT, qrot(shownQ, v));
-  const persp = 7.0 / (7.0 + p[1]);
+  const persp = 30.0 / (30.0 + p[1]);
   const s = Math.min(w, h) * 0.34;
   return [w/2 + p[0]*s*persp, h/2 - p[2]*s*persp, persp];
 }
