@@ -105,3 +105,36 @@ class TestStreamHubBaro:
         hub.stop()
 
         assert 'press' not in hub.snapshot()
+
+
+class DeadAzMPU:
+    """Near-level board whose accel Z axis is stuck at -0.71 — the values
+    measured on the real Stratux AHRS board."""
+
+    @property
+    def mpuDate(self):
+        from datetime import datetime
+        from mpu9250 import MPUData
+        now = datetime.now()
+        return MPUData(g1=0.0, g2=0.0, g3=0.0, a1=0.092, a2=0.043, a3=-0.71,
+                       m1=22.0, m2=0.0, m3=-31.0, temp=30.0, t=now, tm=now, n=1, nm=1)
+
+
+class TestFixAz:
+    @staticmethod
+    def _attitude_error(fix_az):
+        from mpu9250.fusion import q_angle
+        hub = StreamHub(DeadAzMPU(), rate=200, source='test', fix_az=fix_az)
+        hub.start()
+        time.sleep(2.0)
+        hub.stop()
+        return q_angle(tuple(hub.snapshot()['q']), (1.0, 0.0, 0.0, 0.0))
+
+    # thresholds from a direct fusion simulation of these exact readings:
+    # ~5° with reconstruction vs ~46° without, after 2 s
+
+    def test_reconstruction_keeps_a_level_board_level(self):
+        assert self._attitude_error(fix_az=1) < math.radians(12)
+
+    def test_without_it_the_dead_axis_drags_the_attitude_away(self):
+        assert self._attitude_error(fix_az=0) > math.radians(25)

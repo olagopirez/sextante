@@ -107,6 +107,10 @@ def stream_main(argv=None):
                         help='SSE events per second per client (default 30)')
     parser.add_argument('--record', default=None, metavar='CSV',
                         help='also record the session to this CSV while streaming')
+    parser.add_argument('--fix-az', choices=['up', 'down'], default=None,
+                        help="reconstruct a dead accel Z axis from |a|=1g for the attitude "
+                             "filter ('up' if Z should read +1 g at rest); recorded CSVs "
+                             "keep the real sensor values")
     args = parser.parse_args(argv)
 
     from .streamer import serve
@@ -121,8 +125,11 @@ def stream_main(argv=None):
     print(f'streaming {source} on http://{args.host}:{args.port}/  (Ctrl-C to stop)')
     print('open that address from any browser on your network to see the viewer')
     try:
+        fix_az = {'up': 1, 'down': -1}.get(args.fix_az, 0)
+        if fix_az:
+            print('accel Z reconstruction enabled (attitude only)')
         serve(mpu, host=args.host, port=args.port, rate=args.rate,
-              stream_rate=args.stream_rate, source=source, baro=baro)
+              stream_rate=args.stream_rate, source=source, baro=baro, fix_az=fix_az)
     except KeyboardInterrupt:
         pass
     finally:
