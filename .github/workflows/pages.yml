@@ -4,6 +4,8 @@ on:
   push:
     branches: [master]
     paths: ['site/**', '.github/workflows/pages.yml']
+  pull_request:
+    paths: ['site/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -12,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name == 'pull_request' && github.event.number || 'deploy' }}
   cancel-in-progress: true
 
 jobs:
@@ -36,6 +38,8 @@ jobs:
           path: site/dist
 
   deploy:
+    # PRs only validate the build; deploying stays a push-to-master affair
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:
