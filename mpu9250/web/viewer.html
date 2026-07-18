@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sextante — live</title>
+<style>
+  :root {
+    --bg: #02060d; --holo: #35e0ff; --holo-dim: rgba(53,224,255,.28);
+    --holo-faint: rgba(53,224,255,.09); --panel: rgba(6,18,32,.72);
+    --text: #c9e7f2; --muted: #6f93a8; --ok: #31f27b; --warn: #ffb547; --bad: #ff5f5f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--text);
+    font: 13px/1.6 ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+    background:
+      radial-gradient(800px 460px at 60% -10%, rgba(53,224,255,.08), transparent 60%),
+      linear-gradient(rgba(53,224,255,.035) 1px, transparent 1px) 0 0/100% 44px,
+      linear-gradient(90deg, rgba(53,224,255,.035) 1px, transparent 1px) 0 0/44px 100%,
+      var(--bg);
+    min-height: 100vh;
+  }
+  body::after {
+    content: ''; position: fixed; inset: 0; z-index: 999; pointer-events: none;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+  }
+  .bar {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 12px 20px; font-size: .85em; letter-spacing: .1em;
+    border-bottom: 1px solid var(--holo-faint);
+  }
+  .bar b { color: var(--holo); letter-spacing: .18em; }
+  .bar .dim { color: var(--muted); }
+  #link { color: var(--muted); }
+  #conn { display: flex; gap: 7px; align-items: center; white-space: nowrap; }
+  #conn.ok { color: var(--ok); } #conn.bad { color: var(--bad); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+         box-shadow: 0 0 6px currentColor; animation: blink 1.8s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  main {
+    display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px;
+    max-width: 1100px; margin: 0 auto; padding: 16px 20px;
+  }
+  .panel { position: relative; background: var(--panel); border: 1px solid var(--holo-dim); }
+  .panel::before, .panel::after {
+    content: ''; position: absolute; width: 12px; height: 12px;
+    border-style: solid; border-color: var(--holo);
+  }
+  .panel::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+  .panel::after { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+  .title {
+    display: flex; justify-content: space-between; padding: 7px 12px;
+    font-size: .74em; letter-spacing: .22em; color: var(--holo);
+    border-bottom: 1px solid var(--holo-faint);
+  }
+  #cube { width: 100%; aspect-ratio: 1.15; display: block; }
+  .col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .rows { padding: 10px 14px; }
+  .row { display: flex; gap: 8px; align-items: baseline; line-height: 2; }
+  .row .lbl { color: var(--holo); width: 52px; letter-spacing: .08em; }
+  .row .unit { color: var(--muted); width: 26px; font-size: .9em; }
+  .row b { font-weight: 400; flex: 1; text-align: right; color: #dffaff;
+           text-shadow: 0 0 7px rgba(53,224,255,.35); font-variant-numeric: tabular-nums; }
+  canvas.spark { width: 100%; height: 64px; display: block; }
+  .spark-wrap { padding: 8px 12px 10px; }
+  .legend { color: var(--muted); font-size: .78em; letter-spacing: .1em; padding: 0 12px 6px; }
+  .legend i { font-style: normal; }
+  @media (max-width: 780px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <header class="bar">
+    <span><b>⌖ SEXTANTE</b> <span class="dim">// LIVE VIEWER</span></span>
+    <span id="src" class="dim">SOURCE: —</span>
+    <span id="conn" class="bad"><span class="dot"></span><span id="conn-t">CONNECTING</span></span>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="title">ATTITUDE <span id="euler">R +0.0° · P +0.0° · Y +0.0°</span></div>
+      <canvas id="cube"></canvas>
+    </section>
+
+    <div class="col">
+      <section class="panel">
+        <div class="title">TELEMETRY <span id="hz">— Hz</span></div>
+        <div class="rows">
+          <div class="row"><span class="lbl">GYRO</span><span class="unit">°/s</span>
+            <b id="g0"></b><b id="g1"></b><b id="g2"></b></div>
+          <div class="row"><span class="lbl">ACCEL</span><span class="unit">g</span>
+            <b id="a0"></b><b id="a1"></b><b id="a2"></b></div>
+          <div class="row"><span class="lbl">MAG</span><span class="unit">µT</span>
+            <b id="m0"></b><b id="m1"></b><b id="m2"></b></div>
+          <div class="row"><span class="lbl">TEMP</span><span class="unit">°C</span>
+            <b id="temp"></b></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="title">GYRO °/s</div>
+        <div class="spark-wrap"><canvas class="spark" id="sp-g"></canvas></div>
+        <div class="legend"><i style="color:#ff5f5f">■ X</i> <i style="color:#4ade80">■ Y</i> <i style="color:#60a5fa">■ Z</i></div>
+      </section>
+      <section class="panel">
+        <div class="title">ACCEL g</div>
+        <div class="spark-wrap"><canvas class="spark" id="sp-a"></canvas></div>
+      </section>
+      <section class="panel">
+        <div class="title">MAG µT</div>
+        <div class="spark-wrap"><canvas class="spark" id="sp-m"></canvas></div>
+      </section>
+    </div>
+  </main>
+
+<script>
+'use strict';
+
+// ---------- quaternion helpers ----------
+function qmul(a, b) {
+  return [
+    a[0]*b[0] - a[1]*b[1] - a[2]*b[2] - a[3]*b[3],
+    a[0]*b[1] + a[1]*b[0] + a[2]*b[3] - a[3]*b[2],
+    a[0]*b[2] - a[1]*b[3] + a[2]*b[0] + a[3]*b[1],
+    a[0]*b[3] + a[1]*b[2] - a[2]*b[1] + a[3]*b[0],
+  ];
+}
+function qrot(q, v) {
+  const p = qmul(qmul(q, [0, v[0], v[1], v[2]]), [q[0], -q[1], -q[2], -q[3]]);
+  return [p[1], p[2], p[3]];
+}
+function qaxis(axis, angle) {
+  const s = Math.sin(angle / 2);
+  return [Math.cos(angle / 2), axis[0]*s, axis[1]*s, axis[2]*s];
+}
+
+// ---------- wireframe cube renderer (no libraries) ----------
+const cubeCanvas = document.getElementById('cube');
+const cctx = cubeCanvas.getContext('2d');
+const V = [];
+for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) V.push([x*0.62, y*0.62, z*0.62]);
+const EDGES = [[0,1],[0,2],[0,4],[1,3],[1,5],[2,3],[2,6],[3,7],[4,5],[4,6],[5,7],[6,7]];
+const AXES = [
+  { v: [1.15, 0, 0], color: '#ff5f5f', label: 'X' },
+  { v: [0, 1.15, 0], color: '#4ade80', label: 'Y' },
+  { v: [0, 0, 1.15], color: '#60a5fa', label: 'Z' },
+];
+const CAMERA_TILT = qaxis([1, 0, 0], -0.42);  // fixed 3/4 view
+
+let attitude = [1, 0, 0, 0];
+let shownQ = [1, 0, 0, 0];
+
+function project(v, w, h) {
+  // body → world → camera; screen x right, y up; depth along camera y
+  const p = qrot(CAMERA_TILT, qrot(shownQ, v));
+  const persp = 3.2 / (3.2 + p[1]);
+  const s = Math.min(w, h) * 0.30;
+  return [w/2 + p[0]*s*persp, h/2 - p[2]*s*persp, persp];
+}
+
+function drawGrid(w, h) {
+  cctx.save();
+  cctx.strokeStyle = 'rgba(53,224,255,.14)';
+  cctx.lineWidth = 1;
+  const cy = h * 0.86, rx = w * 0.34, ry = rx * 0.28;
+  for (const k of [1, 0.66, 0.33]) {
+    cctx.beginPath();
+    cctx.ellipse(w/2, cy, rx*k, ry*k, 0, 0, Math.PI*2);
+    cctx.stroke();
+  }
+  cctx.beginPath();
+  cctx.moveTo(w/2 - rx, cy); cctx.lineTo(w/2 + rx, cy);
+  cctx.moveTo(w/2, cy - ry); cctx.lineTo(w/2, cy + ry);
+  cctx.stroke();
+  cctx.restore();
+}
+
+function drawCube() {
+  const w = cubeCanvas.width, h = cubeCanvas.height;
+  cctx.clearRect(0, 0, w, h);
+  drawGrid(w, h);
+
+  // slerp-ish smoothing (nlerp is fine at this rate)
+  let dot = shownQ[0]*attitude[0] + shownQ[1]*attitude[1] + shownQ[2]*attitude[2] + shownQ[3]*attitude[3];
+  const sgn = dot < 0 ? -1 : 1;
+  for (let i = 0; i < 4; i++) shownQ[i] += (sgn*attitude[i] - shownQ[i]) * 0.25;
+  const n = Math.hypot(...shownQ);
+  for (let i = 0; i < 4; i++) shownQ[i] /= n;
+
+  const pts = V.map(v => project(v, w, h));
+  cctx.save();
+  cctx.strokeStyle = '#35e0ff';
+  cctx.shadowColor = '#35e0ff';
+  cctx.shadowBlur = 10;
+  for (const [i, j] of EDGES) {
+    cctx.globalAlpha = 0.45 + 0.55 * Math.min(pts[i][2], pts[j][2]);
+    cctx.lineWidth = 1.4;
+    cctx.beginPath();
+    cctx.moveTo(pts[i][0], pts[i][1]);
+    cctx.lineTo(pts[j][0], pts[j][1]);
+    cctx.stroke();
+  }
+  cctx.globalAlpha = 1;
+  const origin = project([0, 0, 0], w, h);
+  cctx.font = `${Math.round(Math.min(w,h)*0.045)}px ui-monospace, monospace`;
+  for (const axis of AXES) {
+    const p = project(axis.v, w, h);
+    cctx.strokeStyle = axis.color;
+    cctx.shadowColor = axis.color;
+    cctx.lineWidth = 2;
+    cctx.beginPath();
+    cctx.moveTo(origin[0], origin[1]);
+    cctx.lineTo(p[0], p[1]);
+    cctx.stroke();
+    cctx.fillStyle = axis.color;
+    cctx.fillText(axis.label, p[0] + 5, p[1] - 5);
+  }
+  cctx.restore();
+  requestAnimationFrame(drawCube);
+}
+
+function fitCanvas(canvas) {
+  const r = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.round(r.width * dpr));
+  canvas.height = Math.max(1, Math.round(r.height * dpr));
+}
+
+// ---------- sparklines ----------
+const HISTORY = 240;
+const sparks = [
+  { id: 'sp-g', key: 'g', buf: [] },
+  { id: 'sp-a', key: 'a', buf: [] },
+  { id: 'sp-m', key: 'm', buf: [] },
+];
+const SERIES_COLORS = ['#ff5f5f', '#4ade80', '#60a5fa'];
+
+function drawSpark(spark) {
+  const canvas = document.getElementById(spark.id);
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  if (spark.buf.length < 2) return;
+
+  let lo = Infinity, hi = -Infinity;
+  for (const row of spark.buf) for (const v of row) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  const pad = Math.max((hi - lo) * 0.1, 1e-6);
+  lo -= pad; hi += pad;
+
+  for (let s = 0; s < 3; s++) {
+    ctx.strokeStyle = SERIES_COLORS[s];
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    spark.buf.forEach((row, i) => {
+      const x = i / (HISTORY - 1) * w;
+      const y = h - (row[s] - lo) / (hi - lo) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- SSE feed ----------
+const fmt = v => (v >= 0 ? '+' : '') + v.toFixed(2);
+const conn = document.getElementById('conn');
+const connT = document.getElementById('conn-t');
+
+const source = new EventSource('events');
+source.onopen = () => { conn.className = 'ok'; connT.textContent = 'LIVE'; };
+source.onerror = () => { conn.className = 'bad'; connT.textContent = 'RECONNECTING'; };
+source.onmessage = (msg) => {
+  const d = JSON.parse(msg.data);
+  attitude = d.q;
+  document.getElementById('src').textContent = 'SOURCE: ' + d.src.toUpperCase();
+  document.getElementById('hz').textContent = d.hz + ' Hz';
+  document.getElementById('euler').textContent =
+    `R ${fmt(d.e[0])}° · P ${fmt(d.e[1])}° · Y ${fmt(d.e[2])}°`;
+  for (let i = 0; i < 3; i++) {
+    document.getElementById('g' + i).textContent = fmt(d.g[i]);
+    document.getElementById('a' + i).textContent = fmt(d.a[i]);
+    document.getElementById('m' + i).textContent = fmt(d.m[i]);
+  }
+  document.getElementById('temp').textContent = fmt(d.temp);
+  for (const spark of sparks) {
+    spark.buf.push(d[spark.key]);
+    if (spark.buf.length > HISTORY) spark.buf.shift();
+    drawSpark(spark);
+  }
+};
+
+function fitAll() {
+  fitCanvas(cubeCanvas);
+  for (const spark of sparks) fitCanvas(document.getElementById(spark.id));
+}
+window.addEventListener('resize', fitAll);
+fitAll();
+drawCube();
+</script>
+</body>
+</html>

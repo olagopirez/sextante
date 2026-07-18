@@ -1,0 +1,89 @@
+"""Synthetic MPU9250 stand-in producing smooth, physically consistent motion.
+
+Lets the whole pipeline — recorder, streamer, viewer, reports — run on any
+machine without hardware: gyro, accel and mag are all derived from one
+analytic orientation path, in driver units (°/s, g, µT).
+"""
+
+import math
+import time
+from datetime import datetime
+
+from .data import MPUData
+from .fusion import q_conjugate, q_from_euler, q_multiply, q_rotate
+
+# Earth frame (z up): gravity specific force and a ~38 µT field with dip
+_GRAVITY = (0.0, 0.0, 1.0)
+_MAG = (22.0, 0.0, -31.0)
+
+
+def _attitude(t):
+    """The scripted orientation path: gentle roll/pitch sways plus a slow yaw."""
+    roll = 0.55 * math.sin(0.31 * t)
+    pitch = 0.38 * math.sin(0.23 * t + 1.1)
+    yaw = 0.25 * t
+    return q_from_euler(roll, pitch, yaw)
+
+
+class DemoMPU:
+    """Drop-in stand-in for MPU9250: same reading surface, synthetic data."""
+
+    def __init__(self, rate=50, noisy=True):
+        self.__rate = rate
+        self.__noisy = noisy
+        self.__t0 = time.monotonic()
+        self.mpuCalDate = None  # parity attribute; unused
+
+    def initialize(self, check_hardware=True):
+        pass
+
+    def self_check(self):
+        return 0x71
+
+    def __sample(self, t):
+        q = _attitude(t)
+
+        # Body-frame gyro from a finite quaternion difference, in °/s
+        eps = 1e-3
+        dq = q_multiply(q_conjugate(q), _attitude(t + eps))
+        gx = 2 * dq[1] / eps * 180 / math.pi
+        gy = 2 * dq[2] / eps * 180 / math.pi
+        gz = 2 * dq[3] / eps * 180 / math.pi
+
+        # World references rotated into the body frame
+        qi = q_conjugate(q)
+        a = q_rotate(qi, _GRAVITY)
+        m = q_rotate(qi, _MAG)
+
+        n = 1.0
+        if self.__noisy:
+            # deterministic pseudo-noise, cheap and repeatable
+            n = math.sin(t * 997.1)
+        return (
+            gx + 0.3 * n, gy + 0.3 * math.sin(t * 883.3), gz + 0.3 * math.sin(t * 761.7),
+            a[0] + 0.004 * n, a[1] + 0.004 * math.sin(t * 653.9), a[2] + 0.004 * math.sin(t * 547.3),
+            m[0] + 0.25 * n, m[1] + 0.25 * math.sin(t * 431.1), m[2] + 0.25 * math.sin(t * 389.7),
+            36.4 + 0.3 * math.sin(t / 9),
+        )
+
+    def attitude(self, t=None):
+        """The ground-truth orientation quaternion (used by tests)."""
+        if t is None:
+            t = time.monotonic() - self.__t0
+        return _attitude(t)
+
+    @property
+    def mpuDate(self):
+        t = time.monotonic() - self.__t0
+        g1, g2, g3, a1, a2, a3, m1, m2, m3, temp = self.__sample(t)
+        now = datetime.now()
+        return MPUData(g1=g1, g2=g2, g3=g3, a1=a1, a2=a2, a3=a3,
+                       m1=m1, m2=m2, m3=m3, temp=temp, t=now, tm=now, n=1, nm=1)
+
+    def get_avg(self):
+        d = self.mpuDate
+        d.N = self.__rate
+        d.NM = min(self.__rate, 100)
+        d.DT = 1000.0 / self.__rate * d.N
+        d.DTM = d.DT
+        return d

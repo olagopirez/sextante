@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/hardware.md`: the MPU-9250 as it actually is — two dies, access modes, endianness, scale factors, magnetometer axis rotation, chip identification.
 - `docs/architecture.md`: module map, thread/queue model, `get_avg()` contract, data path and design decisions.
 - Project website (`site/`, Astro + Three.js) with a HUD-style interface: an interactive 3D scene (stylized Pi board, holographic body-frame IMU cube with a data beam from the chip, polar grid with radar sweep), a live telemetry panel driven by the cube's actual motion, and a typed self-check boot sequence. The cube is draggable and can be driven by a phone's real IMU. Deployed to GitHub Pages on every push to `master`.
+- Data pipeline around the driver, all standard library + numpy:
+  - `sextante-record`: CSV session recorder (interval averages via `get_avg()`).
+  - `sextante-stream`: live streaming server — Mahony AHRS fusion (`fusion.py`) on the Pi and a self-contained web viewer (3D attitude cube, telemetry, rolling charts) served by the Pi over HTTP + Server-Sent Events; `--record` streams and records simultaneously.
+  - `sextante-report`: Markdown session reports (per-channel stats, accumulated rotation, stillness, peak force, magnetometer health) with optional matplotlib PNG plots (`pip install "sextante[plots]"`).
+  - `DemoMPU` synthetic motion source: every command accepts `--demo`, so the whole pipeline runs without hardware; the fusion test suite closes the loop against its ground-truth attitude.
 
 ### Changed
 - The AK8963 now runs in **continuous measurement mode (100 Hz, 16-bit)** instead of per-sample single-measurement retriggering. 16-bit output matches the driver's 0.15 µT/LSB scale — the old 14-bit mode under-reported the field by 4×.

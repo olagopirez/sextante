@@ -22,10 +22,42 @@ flowchart TD
 | `ranges.py` | Full-scale range definitions (bits + LSB scale) and low-pass filter selection |
 | `data.py` | Value objects: a reading (`MPUData`) and user calibration (`MPUCalData`) |
 | `ticker.py` | Drift-free periodic tick source used by the sampling loop |
+| `fusion.py` | Mahony AHRS attitude filter and quaternion helpers |
+| `recorder.py` | CSV session recorder (the one `get_avg()` consumer) |
+| `report.py` | Session loading, analysis metrics and Markdown/PNG rendering |
+| `streamer.py` | Sampling hub + fusion + SSE HTTP server; serves the viewer |
+| `demo.py` | Synthetic motion source, drop-in for `MPU9250` |
+| `cli.py` | `sextante-record` / `sextante-stream` / `sextante-report` |
+| `web/viewer.html` | Self-contained live viewer (hand-rolled canvas 3D, no libraries) |
 
 The I2C bus is **injected** (`MPU9250(bus=...)`); `smbus2` is imported lazily only
 when no bus is given. That single seam is what makes the whole test suite run
 without hardware.
+
+## Data pipeline
+
+Everything downstream of the driver consumes one of its two reading surfaces —
+instantaneous `mpuDate` or interval-averaged `get_avg()`:
+
+```mermaid
+flowchart LR
+    MPU[MPU9250<br/>or DemoMPU] -->|mpuDate @ rate| HUB[StreamHub<br/>+ MahonyAHRS]
+    HUB -->|"SSE /events (JSON)"| VIEW[web viewer<br/>browser on the PC]
+    MPU -->|get_avg per interval| REC[Recorder] --> CSV[(session.csv)]
+    CSV --> REP[sextante-report] --> OUT[report.md + plots]
+```
+
+- **`get_avg()` has exactly one consumer** — it resets the interval accumulators,
+  so the `Recorder` owns it; the `StreamHub` reads `mpuDate` and never interferes.
+  Recording and streaming therefore run simultaneously.
+- **Fusion runs on the Pi**, not in the browser: the hub feeds the Mahony filter at
+  the sample rate and every SSE client receives the same fused quaternion, so N
+  viewers cost N serializations, not N filters.
+- The streamer is **pure standard library** (`ThreadingHTTPServer` + Server-Sent
+  Events) and the viewer is one self-contained HTML file served from package data —
+  nothing to install on the PC, no CDN, works offline.
+- `DemoMPU` derives gyro/accel/mag from a single analytic attitude path, so the
+  fusion tests can close the loop: generate → fuse → compare against ground truth.
 
 ## Runtime model
 
