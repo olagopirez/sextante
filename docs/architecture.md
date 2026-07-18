@@ -26,7 +26,8 @@ flowchart TD
 | `recorder.py` | CSV session recorder (the one `get_avg()` consumer) |
 | `report.py` | Session loading, analysis metrics and Markdown/PNG rendering |
 | `streamer.py` | Sampling hub + fusion + SSE HTTP server; serves the viewer |
-| `demo.py` | Synthetic motion source, drop-in for `MPU9250` |
+| `demo.py` | Synthetic motion source, drop-in for `MPU9250` (+ `DemoBaro`) |
+| `bmp280.py` | Bosch BMP280/BME280 barometer: datasheet compensation, QNH altitude |
 | `cli.py` | `sextante-record` / `sextante-stream` / `sextante-report` |
 | `web/viewer.html` | Self-contained live viewer (hand-rolled canvas 3D, no libraries) |
 
@@ -58,6 +59,10 @@ flowchart LR
   nothing to install on the PC, no CDN, works offline.
 - `DemoMPU` derives gyro/accel/mag from a single analytic attitude path, so the
   fusion tests can close the loop: generate → fuse → compare against ground truth.
+- An optional **BMP280 barometer** joins both paths: the hub reads it at ~10 Hz for
+  the stream, the recorder once per row. Its reads are single SMBus transactions —
+  atomic ioctls the kernel serializes against the MPU reader thread's — so sharing
+  the bus from another thread is safe here.
 
 ## Runtime model
 

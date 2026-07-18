@@ -169,6 +169,15 @@ know what you actually have:
 `MPU9250.self_check()` performs both checks and raises `HardwareMismatchError` with
 a diagnosis; `initialize()` runs it by default.
 
+## The barometer next door
+
+Boards like the **Stratux AHRS** pair the MPU-9250 with a Bosch **BMP280**
+pressure/temperature sensor at I2C `0x76` or `0x77` (chip id `0x58`; the
+register-compatible BME280 answers `0x60`). The driver auto-detects it, applies the
+datasheet compensation, and derives barometric altitude from a configurable
+sea-level pressure (QNH). It is a separate chip on the host bus — not part of the
+MPU-9250 package.
+
 ## Electrical notes
 
 - VDD 2.4–3.6 V (3.3 V typical). Most breakouts include a regulator; check before

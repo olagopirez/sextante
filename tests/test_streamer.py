@@ -83,3 +83,25 @@ class TestHTTPServer:
         payload = json.loads(line[len(b'data: '):])
         assert payload['src'] == 'demo'
         assert len(payload['e']) == 3
+
+
+class TestStreamHubBaro:
+    def test_payload_includes_barometer_when_attached(self):
+        from mpu9250.demo import DemoBaro
+        hub = StreamHub(DemoMPU(), rate=100, source='demo', baro=DemoBaro())
+        hub.start()
+        time.sleep(0.3)
+        hub.stop()
+
+        payload = hub.snapshot()
+        assert 1000 < payload['press'] < 1020   # hPa
+        assert 5 < payload['alt'] < 20
+        assert 'btemp' in payload
+
+    def test_payload_has_no_baro_keys_without_one(self):
+        hub = StreamHub(DemoMPU(), rate=100, source='demo')
+        hub.start()
+        time.sleep(0.2)
+        hub.stop()
+
+        assert 'press' not in hub.snapshot()

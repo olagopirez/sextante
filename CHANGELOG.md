@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `sextante-stream`: live streaming server — Mahony AHRS fusion (`fusion.py`) on the Pi and a self-contained web viewer (3D attitude cube, telemetry, rolling charts) served by the Pi over HTTP + Server-Sent Events; `--record` streams and records simultaneously.
   - `sextante-report`: Markdown session reports (per-channel stats, accumulated rotation, stillness, peak force, magnetometer health) with optional matplotlib PNG plots (`pip install "sextante[plots]"`).
   - `DemoMPU` synthetic motion source: every command accepts `--demo`, so the whole pipeline runs without hardware; the fusion test suite closes the loop against its ground-truth attitude.
+- BMP280/BME280 barometer support (`bmp280.py`): auto-detected at 0x76/0x77, Bosch datasheet compensation (validated against the datasheet's worked example), barometric altitude with adjustable QNH (`--qnh`). Integrated across the pipeline — pressure/altitude CSV columns, `PRESS`/`ALT` in the live viewer, altitude statistics/range in reports and plots — plus `DemoBaro` for hardware-free runs. Completes coverage of the Stratux AHRS board (MPU-9250 + BMP280).
 
 ### Changed
 - The AK8963 now runs in **continuous measurement mode (100 Hz, 16-bit)** instead of per-sample single-measurement retriggering. 16-bit output matches the driver's 0.15 µT/LSB scale — the old 14-bit mode under-reported the field by 4×.

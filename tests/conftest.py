@@ -25,6 +25,9 @@ class FakeSMBus:
     def write_i2c_block_data(self, i2c_addr, register, data):
         self.block_writes.append((i2c_addr, register, list(data)))
 
+    def read_i2c_block_data(self, i2c_addr, register, length):
+        return [self.byte_regs.get((i2c_addr, register + i), 0) for i in range(length)]
+
 
 @pytest.fixture
 def fake_bus():

@@ -5,34 +5,42 @@ import math
 from datetime import datetime
 
 _CHANNELS = [
-    ('g1', 'Gyro X', '°/s'), ('g2', 'Gyro Y', '°/s'), ('g3', 'Gyro Z', '°/s'),
-    ('a1', 'Accel X', 'g'), ('a2', 'Accel Y', 'g'), ('a3', 'Accel Z', 'g'),
-    ('m1', 'Mag X', 'µT'), ('m2', 'Mag Y', 'µT'), ('m3', 'Mag Z', 'µT'),
-    ('temp', 'Temperature', '°C'),
+    ('g1', 'Gyro X', '°/s', 1), ('g2', 'Gyro Y', '°/s', 1), ('g3', 'Gyro Z', '°/s', 1),
+    ('a1', 'Accel X', 'g', 1), ('a2', 'Accel Y', 'g', 1), ('a3', 'Accel Z', 'g', 1),
+    ('m1', 'Mag X', 'µT', 1), ('m2', 'Mag Y', 'µT', 1), ('m3', 'Mag Z', 'µT', 1),
+    ('temp', 'Temperature', '°C', 1),
+]
+
+# Present only in sessions recorded with a barometer attached
+_BARO_CHANNELS = [
+    ('press_pa', 'Pressure', 'hPa', 0.01),
+    ('baro_temp', 'Baro temperature', '°C', 1),
+    ('alt_m', 'Altitude', 'm', 1),
 ]
 
 STILL_GYRO_DPS = 1.5  # below this on every axis, the device counts as still
 
 
 def load_session(path):
-    """Reads a recorder CSV into a dict of column lists (floats where numeric)."""
-    rows = []
+    """Reads a recorder CSV into a dict of column lists, keyed by the header.
+    Numeric cells parse to float; empty cells (e.g. no barometer) to None."""
     with open(path, newline='') as fh:
-        for row in csv.DictReader(fh):
-            rows.append(row)
+        reader = csv.DictReader(fh)
+        fields = reader.fieldnames or []
+        rows = list(reader)
     if not rows:
         raise ValueError(f'{path}: no data rows')
 
-    session = {'timestamp': [], 'error': []}
-    for key in [c[0] for c in _CHANNELS] + ['n', 'nm', 'dt_ms', 'dtm_ms']:
-        session[key] = []
+    session = {key: [] for key in fields}
     for row in rows:
-        session['timestamp'].append(datetime.fromisoformat(row['timestamp']))
-        session['error'].append(row.get('error') or '')
-        for key in session:
-            if key in ('timestamp', 'error'):
-                continue
-            session[key].append(float(row[key] or 0))
+        for key in fields:
+            raw = row.get(key) or ''
+            if key == 'timestamp':
+                session[key].append(datetime.fromisoformat(raw))
+            elif key == 'error':
+                session[key].append(raw)
+            else:
+                session[key].append(float(raw) if raw != '' else None)
     return session
 
 
@@ -55,17 +63,23 @@ def analyze(session):
     duration = (ts[-1] - ts[0]).total_seconds()
     rows = len(ts)
 
+    channels = {}
+    for key, _, _, scale in _CHANNELS + _BARO_CHANNELS:
+        values = [v * scale for v in session.get(key, []) if v is not None]
+        if values:
+            channels[key] = _stats(values)
+
     result = {
         'rows': rows,
         'duration_s': duration,
         'row_rate_hz': (rows - 1) / duration if duration > 0 else 0.0,
         'samples': int(sum(session['n'])),
         'errors': sum(1 for e in session['error'] if e),
-        'channels': {key: _stats(session[key]) for key, _, _ in _CHANNELS},
+        'channels': channels,
     }
 
     # Motion: accumulated rotation per axis (∫|ω|dt) and stillness share
-    dts = [dt / 1000.0 for dt in session['dt_ms']]
+    dts = [(dt or 0) / 1000.0 for dt in session['dt_ms']]
     for axis in ('g1', 'g2', 'g3'):
         result[f'rotation_{axis}_deg'] = sum(abs(w) * dt for w, dt in zip(session[axis], dts))
     still = sum(
@@ -86,6 +100,12 @@ def analyze(session):
             for i in range(rows)]
     result['mag_mean_ut'] = sum(mmag) / rows
     result['mag_plausible'] = 25.0 <= result['mag_mean_ut'] <= 65.0
+
+    # Altitude excursion, when a barometer was recorded
+    alts = [v for v in session.get('alt_m', []) if v is not None]
+    if alts:
+        result['alt_min_m'] = min(alts)
+        result['alt_max_m'] = max(alts)
 
     return result
 
@@ -113,7 +133,9 @@ def render_markdown(path, session, analysis):
         '| Channel | Unit | Mean | Std | Min | Max | RMS |',
         '|---------|------|------|-----|-----|-----|-----|',
     ]
-    for key, label, unit in _CHANNELS:
+    for key, label, unit, _ in _CHANNELS + _BARO_CHANNELS:
+        if key not in a['channels']:
+            continue
         s = a['channels'][key]
         lines.append(
             f"| {label} | {unit} | {s['mean']:.3f} | {s['std']:.3f} "
@@ -131,8 +153,12 @@ def render_markdown(path, session, analysis):
         f"| Still (gyro < {STILL_GYRO_DPS}°/s) | {a['still_pct']:.1f}% of the session |",
         f"| Peak specific force | {a['peak_accel_g']:.3f} g at {a['peak_accel_at'].isoformat()} |",
         f"| Magnetic field magnitude | {a['mag_mean_ut']:.1f} µT — {mag_verdict} |",
-        '',
     ]
+    if 'alt_min_m' in a:
+        span = a['alt_max_m'] - a['alt_min_m']
+        lines.append(
+            f"| Altitude range | {a['alt_min_m']:.1f} – {a['alt_max_m']:.1f} m (Δ {span:.1f} m) |")
+    lines.append('')
     return '\n'.join(lines)
 
 
@@ -155,11 +181,14 @@ def write_plots(session, out_dir):
         ('mag', 'µT', ['m1', 'm2', 'm3']),
         ('temp', '°C', ['temp']),
     ]
+    if any(v is not None for v in session.get('alt_m', [])):
+        groups.append(('altitude', 'm', ['alt_m']))
     written = []
     for name, unit, keys in groups:
         fig, ax = plt.subplots(figsize=(9, 3.2), dpi=110)
         for key in keys:
-            ax.plot(seconds, session[key], label=key, linewidth=0.9)
+            pairs = [(s, v) for s, v in zip(seconds, session[key]) if v is not None]
+            ax.plot([p[0] for p in pairs], [p[1] for p in pairs], label=key, linewidth=0.9)
         ax.set_xlabel('s')
         ax.set_ylabel(unit)
         ax.set_title(name)

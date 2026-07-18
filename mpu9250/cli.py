@@ -15,20 +15,39 @@ def _add_source_args(parser):
                         help='skip the WHO_AM_I/WIA hardware self-check')
     parser.add_argument('--address', type=lambda v: int(v, 0), default=None,
                         help='I2C address (default 0x68; use 0x69 with AD0 high)')
+    parser.add_argument('--no-baro', action='store_true',
+                        help='do not look for a BMP280 barometer')
+    parser.add_argument('--baro-address', type=lambda v: int(v, 0), default=None,
+                        help='BMP280 I2C address (default: probe 0x76 then 0x77)')
+    parser.add_argument('--qnh', type=float, default=1013.25, metavar='hPa',
+                        help='sea-level pressure for barometric altitude (default 1013.25)')
 
 
 def _make_source(args):
     if args.demo:
-        from .demo import DemoMPU
+        from .demo import DemoBaro, DemoMPU
         mpu = DemoMPU(rate=args.rate)
         mpu.initialize()
-        return mpu, 'demo'
+        baro = None if args.no_baro else DemoBaro(sea_level_pa=args.qnh * 100.0)
+        return mpu, baro, 'demo'
 
     from .constants import MPU_ADDRESS
     from .driver import MPU9250
     mpu = MPU9250(address=args.address or MPU_ADDRESS, rate=args.rate)
     mpu.initialize(check_hardware=not args.skip_check)
-    return mpu, 'mpu9250'
+
+    baro = None
+    if not args.no_baro:
+        from .bmp280 import BMP280
+        from .driver import HardwareMismatchError
+        try:
+            baro = BMP280(address=args.baro_address, sea_level_pa=args.qnh * 100.0)
+            chip_id = baro.initialize()
+            print(f'barometer: {"BME280" if chip_id == 0x60 else "BMP280"} found')
+        except (HardwareMismatchError, OSError) as exc:
+            print(f'barometer: none ({exc})')
+            baro = None
+    return mpu, baro, 'mpu9250'
 
 
 def record_main(argv=None):
@@ -46,11 +65,11 @@ def record_main(argv=None):
 
     from .recorder import Recorder
     path = args.out or datetime.now().strftime('sextante-%Y%m%d-%H%M%S.csv')
-    mpu, source = _make_source(args)
+    mpu, baro, source = _make_source(args)
     print(f'recording {source} @ {args.rate} Hz -> {path} '
           f'(one row every {args.interval:g}s; Ctrl-C to stop)')
 
-    recorder = Recorder(mpu, path, interval=args.interval)
+    recorder = Recorder(mpu, path, interval=args.interval, baro=baro)
     recorder.start()
     try:
         if args.duration:
@@ -80,19 +99,19 @@ def stream_main(argv=None):
     args = parser.parse_args(argv)
 
     from .streamer import serve
-    mpu, source = _make_source(args)
+    mpu, baro, source = _make_source(args)
 
     recorder = None
     if args.record:
         from .recorder import Recorder
-        recorder = Recorder(mpu, args.record, interval=0.2).start()
+        recorder = Recorder(mpu, args.record, interval=0.2, baro=baro).start()
         print(f'recording to {args.record}')
 
     print(f'streaming {source} on http://{args.host}:{args.port}/  (Ctrl-C to stop)')
     print('open that address from any browser on your network to see the viewer')
     try:
         serve(mpu, host=args.host, port=args.port, rate=args.rate,
-              stream_rate=args.stream_rate, source=source)
+              stream_rate=args.stream_rate, source=source, baro=baro)
     except KeyboardInterrupt:
         pass
     finally:

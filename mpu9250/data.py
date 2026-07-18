@@ -96,3 +96,21 @@ class MPUCalData:
             'Ms32': self.Ms32,
             'Ms33': self.Ms33
         }
+
+
+class BaroData:
+    """One barometer reading: pressure (Pa), temperature (°C), altitude (m)."""
+
+    def __init__(self, pressure=0.0, temp=0.0, altitude=0.0, t=None):
+        self.Pressure = pressure
+        self.Temp = temp
+        self.Altitude = altitude
+        self.T = t if t is not None else dtime.now()
+
+    def get_json(self):
+        return {
+            'Pressure': self.Pressure,
+            'Temp': self.Temp,
+            'Altitude': self.Altitude,
+            'T': self.T,
+        }

@@ -203,3 +203,18 @@ AKM_CONTINUOUS_100HZ = 0x06  # AK8963 CNTL1: continuous measurement mode 2
 MPU9250M_4800uT = 0.6  # 0.6 uT/LSB
 MPU9250T_85degC = 0.002995177763  # 0.002995177763 degC/LSB
 Magnetometer_Sensitivity_Scale_Factor = 0.15
+
+# ---------- BMP280 barometer (companion chip on Stratux AHRS boards) ---------- #
+
+BMP280_ADDRESS_PRIMARY = 0x76
+BMP280_ADDRESS_SECONDARY = 0x77
+BMP280_REG_CHIP_ID = 0xD0
+BMP280_REG_RESET = 0xE0
+BMP280_REG_STATUS = 0xF3
+BMP280_REG_CTRL_MEAS = 0xF4
+BMP280_REG_CONFIG = 0xF5
+BMP280_REG_DATA = 0xF7  # press msb/lsb/xlsb, temp msb/lsb/xlsb
+BMP280_REG_CALIB = 0x88  # 24 bytes: dig_T1..T3, dig_P1..P9, little-endian
+BMP280_CHIP_ID = 0x58
+BME280_CHIP_ID = 0x60  # register-compatible for pressure/temperature
+BMP280_SOFT_RESET = 0xB6
