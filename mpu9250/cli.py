@@ -24,6 +24,9 @@ def _add_source_args(parser):
     parser.add_argument('--calibrate', type=float, default=2.0, metavar='SECONDS',
                         help='measure gyro bias at startup with the device still '
                              '(default 2.0; use 0 to skip)')
+    parser.add_argument('--mount', default=None, metavar='SPEC',
+                        help="mounting correction as quarter turns, e.g. 'x180' when the "
+                             "chip sits upside down (Stratux AHRS), or 'x180,z90'")
 
 
 def _make_source(args):
@@ -36,7 +39,7 @@ def _make_source(args):
 
     from .constants import MPU_ADDRESS
     from .driver import MPU9250
-    mpu = MPU9250(address=args.address or MPU_ADDRESS, rate=args.rate)
+    mpu = MPU9250(address=args.address or MPU_ADDRESS, rate=args.rate, mount=args.mount)
     mpu.initialize(check_hardware=not args.skip_check)
 
     if args.calibrate > 0:
