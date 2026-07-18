@@ -257,3 +257,26 @@ class TestGetAvg:
         threading.Thread(target=serve, daemon=True).start()
 
         assert mpu.get_avg() is sentinel
+
+
+class TestGyroCalibration:
+    def test_measures_and_folds_bias_into_calibration(self, mpu):
+        mpu.mpuDate = MPUData(g1=1.2, g2=-0.8, g3=2.0)
+
+        bias = mpu.calibrate_gyro(duration=0.06)
+
+        assert bias == pytest.approx((1.2, -0.8, 2.0))
+        scale = 250.0 / 32767.0
+        assert float(mpu.mpuCalDate.G01) == pytest.approx(1.2 / scale)
+        assert float(mpu.mpuCalDate.G02) == pytest.approx(-0.8 / scale)
+        assert float(mpu.mpuCalDate.G03) == pytest.approx(2.0 / scale)
+
+    def test_accumulates_over_repeated_calibrations(self, mpu):
+        mpu.mpuDate = MPUData(g1=1.0)
+        mpu.calibrate_gyro(duration=0.05)
+        first = float(mpu.mpuCalDate.G01)
+
+        mpu.calibrate_gyro(duration=0.05)
+
+        assert first > 0
+        assert float(mpu.mpuCalDate.G01) == pytest.approx(2 * first, rel=1e-6)

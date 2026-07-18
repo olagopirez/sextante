@@ -80,6 +80,9 @@ class DemoMPU:
         return MPUData(g1=g1, g2=g2, g3=g3, a1=a1, a2=a2, a3=a3,
                        m1=m1, m2=m2, m3=m3, temp=temp, t=now, tm=now, n=1, nm=1)
 
+    def calibrate_gyro(self, duration=2.0):
+        return (0.0, 0.0, 0.0)
+
     def get_avg(self):
         d = self.mpuDate
         d.N = self.__rate

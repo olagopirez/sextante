@@ -21,6 +21,9 @@ def _add_source_args(parser):
                         help='BMP280 I2C address (default: probe 0x76 then 0x77)')
     parser.add_argument('--qnh', type=float, default=1013.25, metavar='hPa',
                         help='sea-level pressure for barometric altitude (default 1013.25)')
+    parser.add_argument('--calibrate', type=float, default=2.0, metavar='SECONDS',
+                        help='measure gyro bias at startup with the device still '
+                             '(default 2.0; use 0 to skip)')
 
 
 def _make_source(args):
@@ -35,6 +38,11 @@ def _make_source(args):
     from .driver import MPU9250
     mpu = MPU9250(address=args.address or MPU_ADDRESS, rate=args.rate)
     mpu.initialize(check_hardware=not args.skip_check)
+
+    if args.calibrate > 0:
+        print(f'calibrating gyro bias — keep the device still for {args.calibrate:g}s...')
+        bias = mpu.calibrate_gyro(args.calibrate)
+        print(f'gyro bias removed: [{bias[0]:+.2f}, {bias[1]:+.2f}, {bias[2]:+.2f}] °/s')
 
     baro = None
     if not args.no_baro:
