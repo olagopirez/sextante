@@ -174,8 +174,10 @@ export function initScene(canvas, imuButton) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-  camera.position.set(0, 2.4, 7.4);
+  // Telephoto framing: a wide FOV up close bends the cube into a frustum, so
+  // the camera sits 3x farther with a matching narrow FOV (same subject size)
+  const camera = new THREE.PerspectiveCamera(15, 1, 0.1, 100);
+  camera.position.set(0, 5.4, 22.2);
   camera.lookAt(0, 0.9, 0);
 
   scene.add(new THREE.AmbientLight(0x6b87a8, 0.55));
