@@ -19,18 +19,27 @@ The driver samples the sensor from a background thread at a configurable rate an
 - Magnetometer in continuous 16-bit mode (0.15 µT/LSB), validity-gated by the `ST1`/`ST2` status registers and reported in the accel/gyro frame.
 - Hardware self-check on startup: verifies `WHO_AM_I` and the AK8963 device id, catching the common relabeled/magnetometer-less boards before configuring anything.
 - User calibration hooks (`MPUCalData`): hardware biases and a magnetometer rescaling matrix.
-- Fully testable without hardware — the I2C bus is injectable.
+- Session recording to CSV on the Pi and Markdown/PNG analysis reports (`sextante-record`, `sextante-report`).
+- Live motion viewing from any PC: Mahony sensor fusion on the Pi and a zero-install web viewer served by the Pi itself (`sextante-stream`).
+- Fully testable without hardware — the I2C bus is injectable, and every CLI accepts `--demo` to run on synthetic motion.
 
 ## Project layout
 
 ```
 mpu9250/            The package
-├── __init__.py     Public API (MPU9250, MPUData, MPUCalData, AccelRange, GyroRange, LPF)
+├── __init__.py     Public API (MPU9250, MPUData, MPUCalData, ranges, MahonyAHRS, Recorder, DemoMPU)
 ├── driver.py       MPU9250 class: chip setup, sampling loop, averaging
 ├── constants.py    Register map and configuration bits (MPU-9250 + AK8963)
 ├── ranges.py       Accel/gyro range definitions and LPF selection
 ├── data.py         MPUData / MPUCalData value objects
-└── ticker.py       Drift-free periodic ticker thread used by the sampling loop
+├── ticker.py       Drift-free periodic ticker thread used by the sampling loop
+├── fusion.py       Mahony AHRS attitude filter + quaternion helpers
+├── recorder.py     CSV session recorder
+├── report.py       Session analysis and Markdown/PNG report rendering
+├── streamer.py     Sampling hub + SSE HTTP server (serves the live viewer)
+├── demo.py         Synthetic motion source (run everything without hardware)
+├── cli.py          sextante-record / sextante-stream / sextante-report
+└── web/viewer.html Self-contained live viewer app (no external dependencies)
 docs/
 ├── hardware.md     What the MPU-9250 actually is (dies, buses, formats, identification)
 └── architecture.md How the driver works (threads, queues, data path, decisions)
@@ -115,6 +124,38 @@ At rest, expect `A3 ≈ 1.0` (gravity), `A1 ≈ A2 ≈ 0`, gyros ≈ 0 and `Temp
 ### Calibration
 
 `mpu.mpuCalDate` (`MPUCalData`) holds user calibration: per-axis hardware biases for gyro (`G0*`), accel (`A0*`) and magnetometer (`M0*`), plus a 3×3 magnetometer rescaling matrix (`Ms*`, identity by default). Set these before `initialize()`. Gyro/accel biases are in raw LSB; the magnetometer biases and `Ms` matrix apply **in the accel/gyro frame**, after factory scaling and the axis remap — use them for hard-iron/soft-iron correction.
+
+## Recording, streaming and reports
+
+The package installs three commands that turn the driver into a full data pipeline:
+
+```bash
+# 1. Record a session on the Pi: one CSV row per interval average
+sextante-record -o session.csv --interval 0.2
+
+# 2. Watch the movement live from your PC — the Pi serves the viewer app itself
+sextante-stream --port 8000              # then open http://<pi-address>:8000
+sextante-stream --record session.csv     # stream and record at the same time
+
+# 3. Analyze what you captured
+sextante-report session.csv -o report.md
+sextante-report session.csv --plots out/   # PNG time series (pip install matplotlib)
+```
+
+**The viewer needs nothing installed on the PC**: the Pi serves a single self-contained
+page at `/` and streams data over Server-Sent Events at `/events` (pure standard
+library — no websockets, no frameworks). The page shows the live 3D attitude cube,
+telemetry and rolling charts; orientation is estimated on the Pi by a **Mahony AHRS
+filter** fusing gyro + accel + magnetometer, all in the body frame the driver reports.
+
+**Reports** summarize a recorded session: per-channel statistics, accumulated rotation
+per axis, stillness share, peak specific force, and a magnetometer health check
+(Earth's field magnitude should sit in ~25–65 µT).
+
+Every command accepts `--demo` to run against a synthetic motion source — the whole
+pipeline works on any machine, no hardware needed. Note: the recorder is the only
+component that may call `get_avg()` (it resets the interval accumulators); the
+streamer reads instantaneous samples, so recording and streaming coexist fine.
 
 ## Running the tests
 

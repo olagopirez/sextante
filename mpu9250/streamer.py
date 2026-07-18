@@ -1,0 +1,141 @@
+"""Live streaming: samples the IMU, fuses attitude, serves a web viewer + SSE.
+
+Pure standard library — the Raspberry Pi serves both the data stream
+(``/events``, Server-Sent Events) and the viewer app itself (``/``), so the
+"app" on the PC is just a browser pointed at the Pi.
+"""
+
+import json
+import math
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import resources
+
+from .fusion import MahonyAHRS
+
+DEG = math.pi / 180
+
+
+class StreamHub(threading.Thread):
+    """Samples ``mpu.mpuDate`` at a fixed rate, runs the Mahony filter and
+    keeps the latest JSON-ready payload for any number of SSE clients."""
+
+    def __init__(self, mpu, rate=50, source='mpu9250'):
+        threading.Thread.__init__(self)
+        self.daemon = True
+        self.__mpu = mpu
+        self.__period = 1.0 / rate
+        self.__stop = threading.Event()
+        self.fusion = MahonyAHRS()
+        self.source = source
+        self.rate = rate
+        self.latest = None
+        self.__lock = threading.Lock()
+
+    def run(self):
+        prev = time.monotonic()
+        while not self.__stop.is_set():
+            d = self.__mpu.mpuDate
+            now = time.monotonic()
+            dt = min(max(now - prev, 1e-4), 0.2)
+            prev = now
+
+            mag_ok = d.NM > 0 and not (d.M1 == 0 and d.M2 == 0 and d.M3 == 0)
+            q = self.fusion.update(
+                float(d.G1) * DEG, float(d.G2) * DEG, float(d.G3) * DEG,
+                float(d.A1), float(d.A2), float(d.A3),
+                float(d.M1) if mag_ok else None,
+                float(d.M2) if mag_ok else None,
+                float(d.M3) if mag_ok else None,
+                dt=dt,
+            )
+            roll, pitch, yaw = self.fusion.euler()
+            payload = {
+                't': d.T.isoformat(),
+                'src': self.source,
+                'hz': self.rate,
+                'g': [round(float(d.G1), 3), round(float(d.G2), 3), round(float(d.G3), 3)],
+                'a': [round(float(d.A1), 4), round(float(d.A2), 4), round(float(d.A3), 4)],
+                'm': [round(float(d.M1), 2), round(float(d.M2), 2), round(float(d.M3), 2)],
+                'temp': round(float(d.Temp), 2),
+                'q': [round(c, 5) for c in q],
+                'e': [round(roll / DEG, 2), round(pitch / DEG, 2), round(yaw / DEG, 2)],
+            }
+            with self.__lock:
+                self.latest = payload
+            self.__stop.wait(self.__period)
+
+    def snapshot(self):
+        with self.__lock:
+            return self.latest
+
+    def stop(self):
+        self.__stop.set()
+
+
+def _viewer_html():
+    return resources.files('mpu9250.web').joinpath('viewer.html').read_bytes()
+
+
+class _Handler(BaseHTTPRequestHandler):
+    hub = None
+    stream_period = 1 / 30
+
+    def log_message(self, *args):
+        pass
+
+    def __send(self, code, ctype, body):
+        self.send_response(code)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        path = self.path.split('?', 1)[0]
+        if path == '/':
+            self.__send(200, 'text/html; charset=utf-8', _viewer_html())
+        elif path == '/status':
+            body = json.dumps({'source': self.hub.source, 'rate': self.hub.rate}).encode()
+            self.__send(200, 'application/json', body)
+        elif path == '/events':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                while True:
+                    payload = self.hub.snapshot()
+                    if payload is not None:
+                        data = json.dumps(payload)
+                        self.wfile.write(f'data: {data}\n\n'.encode())
+                        self.wfile.flush()
+                    time.sleep(self.stream_period)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+        else:
+            self.__send(404, 'text/plain', b'not found')
+
+
+def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250'):
+    """Starts the sampling hub and returns (httpd, hub); caller serves/shuts down."""
+    hub = StreamHub(mpu, rate=rate, source=source)
+    hub.start()
+
+    handler = type('Handler', (_Handler,), {'hub': hub, 'stream_period': 1.0 / stream_rate})
+    httpd = ThreadingHTTPServer((host, port), handler)
+    httpd.daemon_threads = True
+    return httpd, hub
+
+
+def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250'):
+    """Blocks serving the viewer and the SSE stream until interrupted."""
+    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source)
+    try:
+        httpd.serve_forever()
+    finally:
+        hub.stop()
+        httpd.server_close()

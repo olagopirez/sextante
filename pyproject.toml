@@ -26,6 +26,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+plots = ["matplotlib"]
+
+[project.scripts]
+sextante-record = "mpu9250.cli:record_main"
+sextante-stream = "mpu9250.cli:stream_main"
+sextante-report = "mpu9250.cli:report_main"
 
 [project.urls]
 Repository = "https://github.com/olagopirez/sextante"
@@ -34,6 +40,9 @@ Issues = "https://github.com/olagopirez/sextante/issues"
 
 [tool.setuptools.packages.find]
 include = ["mpu9250*"]
+
+[tool.setuptools.package-data]
+"mpu9250.web" = ["*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
