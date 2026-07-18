@@ -154,6 +154,11 @@ filter** fusing gyro + accel + magnetometer, all in the body frame the driver re
 per axis, stillness share, peak specific force, and a magnetometer health check
 (Earth's field magnitude should sit in ~25–65 µT).
 
+**Gyro calibration**: MEMS gyros always show a constant per-axis bias (~1 °/s) that
+makes the attitude wander at rest. Every command measures and removes it at startup —
+keep the device still for the first 2 seconds (tune with `--calibrate 5`, skip with
+`--calibrate 0`; also available as `MPU9250.calibrate_gyro()`).
+
 **Barometer**: when a BMP280/BME280 answers on the bus (the Stratux AHRS board pairs
 one with the MPU-9250), every command picks it up automatically — pressure/altitude
 columns in the CSV, `PRESS`/`ALT` in the live viewer, altitude statistics and range in

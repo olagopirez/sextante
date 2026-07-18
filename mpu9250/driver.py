@@ -446,3 +446,33 @@ class MPU9250:
         reply = queue.Queue(maxsize=1)
         self.__QUEUE.put(reply)
         return reply.get()
+
+    def calibrate_gyro(self, duration=2.0):
+        """
+        Measures the gyro bias over ``duration`` seconds — the device must sit
+        still — and folds it into ``mpuCalDate`` so subsequent readings center
+        on zero. Call after ``initialize()``. Returns the measured bias in °/s.
+
+        MEMS gyros always show a constant offset per axis (typically around
+        ±1 °/s, drifting with temperature); without this the attitude filter
+        fights a phantom rotation forever.
+        """
+        deadline = time.monotonic() + duration
+        sums = [0.0, 0.0, 0.0]
+        n = 0
+        while time.monotonic() < deadline:
+            d = self.mpuDate
+            sums[0] += float(d.G1)
+            sums[1] += float(d.G2)
+            sums[2] += float(d.G3)
+            n += 1
+            time.sleep(1.0 / self.__lpf.get_rate())
+        if n == 0:
+            return (0.0, 0.0, 0.0)
+
+        bias = (sums[0] / n, sums[1] / n, sums[2] / n)
+        scale = self.__gyro_range.get_scale()
+        self.mpuCalDate.G01 += bias[0] / scale
+        self.mpuCalDate.G02 += bias[1] / scale
+        self.mpuCalDate.G03 += bias[2] / scale
+        return bias
