@@ -164,6 +164,11 @@ mounts it Z-down), pass `--mount x180` (any comma list of quarter turns, e.g.
 `x180,z90`) and gyro/accel/mag are rotated into the vehicle frame — the viewer then
 shows the *board* level when it is level.
 
+**Dead accel axis**: MEMS accelerometers can lose an axis with age (stuck proof
+mass — the reading ignores gravity entirely). `sextante-stream --fix-az up|down`
+rebuilds the vertical component from the 1 g constraint for the attitude filter,
+while recorded CSVs keep the real sensor values. Valid for tilts below 90°.
+
 **Barometer**: when a BMP280/BME280 answers on the bus (the Stratux AHRS board pairs
 one with the MPU-9250), every command picks it up automatically — pressure/altitude
 columns in the CSV, `PRESS`/`ALT` in the live viewer, altitude statistics and range in

@@ -145,3 +145,15 @@ class MahonyAHRS:
     def euler(self):
         """Returns (roll, pitch, yaw) of the current attitude, in radians."""
         return q_to_euler(self.q)
+
+
+def reconstruct_az(ax, ay, sign=1.0):
+    """
+    Rebuilds the vertical accelerometer component from the 1 g constraint when
+    the Z axis is dead (stuck MEMS proof mass): az = sign·√(1 − ax² − ay²).
+
+    Valid for static and gently dynamic motion with tilts below 90°; beyond
+    that the sign of az cannot be observed from ax/ay alone.
+    """
+    mag2 = ax * ax + ay * ay
+    return math.copysign(math.sqrt(max(0.0, 1.0 - min(mag2, 1.0))), sign)

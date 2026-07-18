@@ -12,7 +12,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
-from .fusion import MahonyAHRS
+from .fusion import MahonyAHRS, reconstruct_az
 
 DEG = math.pi / 180
 
@@ -21,11 +21,12 @@ class StreamHub(threading.Thread):
     """Samples ``mpu.mpuDate`` at a fixed rate, runs the Mahony filter and
     keeps the latest JSON-ready payload for any number of SSE clients."""
 
-    def __init__(self, mpu, rate=50, source='mpu9250', baro=None):
+    def __init__(self, mpu, rate=50, source='mpu9250', baro=None, fix_az=0):
         threading.Thread.__init__(self)
         self.daemon = True
         self.__mpu = mpu
         self.__baro = baro
+        self.__fix_az = fix_az  # 0 = off; ±1 = sign of a healthy vertical axis
         self.__baro_every = max(1, rate // 10)  # ~10 Hz is plenty for pressure
         self.__period = 1.0 / rate
         self.__stop = threading.Event()
@@ -53,9 +54,12 @@ class StreamHub(threading.Thread):
             tick += 1
 
             mag_ok = d.NM > 0 and not (d.M1 == 0 and d.M2 == 0 and d.M3 == 0)
+            az = float(d.A3)
+            if self.__fix_az:
+                az = reconstruct_az(float(d.A1), float(d.A2), self.__fix_az)
             q = self.fusion.update(
                 float(d.G1) * DEG, float(d.G2) * DEG, float(d.G3) * DEG,
-                float(d.A1), float(d.A2), float(d.A3),
+                float(d.A1), float(d.A2), az,
                 float(d.M1) if mag_ok else None,
                 float(d.M2) if mag_ok else None,
                 float(d.M3) if mag_ok else None,
@@ -135,9 +139,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.__send(404, 'text/plain', b'not found')
 
 
-def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None):
+def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None, fix_az=0):
     """Starts the sampling hub and returns (httpd, hub); caller serves/shuts down."""
-    hub = StreamHub(mpu, rate=rate, source=source, baro=baro)
+    hub = StreamHub(mpu, rate=rate, source=source, baro=baro, fix_az=fix_az)
     hub.start()
 
     handler = type('Handler', (_Handler,), {'hub': hub, 'stream_period': 1.0 / stream_rate})
@@ -146,9 +150,9 @@ def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, sourc
     return httpd, hub
 
 
-def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None):
+def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None, fix_az=0):
     """Blocks serving the viewer and the SSE stream until interrupted."""
-    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source, baro=baro)
+    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source, baro=baro, fix_az=fix_az)
     try:
         httpd.serve_forever()
     finally:

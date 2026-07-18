@@ -72,3 +72,18 @@ class TestMahonyAHRS:
             ahrs.update(gx * DEG, gy * DEG, gz * DEG, ax, ay, az, mx, my, mz, dt=dt)
             t += dt
         assert q_angle(ahrs.q, mpu.attitude(t)) < 8 * DEG
+
+
+class TestReconstructAz:
+    def test_level_gives_full_gravity(self):
+        from mpu9250.fusion import reconstruct_az
+        assert reconstruct_az(0.0, 0.0, 1.0) == pytest.approx(1.0)
+        assert reconstruct_az(0.0, 0.0, -1.0) == pytest.approx(-1.0)
+
+    def test_tilt_follows_the_1g_sphere(self):
+        from mpu9250.fusion import reconstruct_az
+        assert reconstruct_az(math.sin(30 * DEG), 0.0, 1.0) == pytest.approx(math.cos(30 * DEG))
+
+    def test_clamps_beyond_1g(self):
+        from mpu9250.fusion import reconstruct_az
+        assert reconstruct_az(1.5, 0.0, 1.0) == 0.0
