@@ -5,20 +5,23 @@ import threading
 import time
 
 FIELDS = ['timestamp', 'g1', 'g2', 'g3', 'a1', 'a2', 'a3',
-          'm1', 'm2', 'm3', 'temp', 'n', 'nm', 'dt_ms', 'dtm_ms', 'error']
+          'm1', 'm2', 'm3', 'temp', 'n', 'nm', 'dt_ms', 'dtm_ms',
+          'press_pa', 'baro_temp', 'alt_m', 'error']
 
 
 class Recorder:
     """
     Periodically calls ``mpu.get_avg()`` and appends one CSV row per interval.
+    With a barometer attached, each row also carries pressure/temperature/altitude.
 
     ``get_avg()`` resets the driver's accumulators, so the recorder must be
     the only consumer calling it — the streamer reads instantaneous data and
     does not interfere.
     """
 
-    def __init__(self, mpu, path, interval=0.2):
+    def __init__(self, mpu, path, interval=0.2, baro=None):
         self.__mpu = mpu
+        self.__baro = baro
         self.__path = path
         self.__interval = float(interval)
         self.__stop = threading.Event()
@@ -39,6 +42,13 @@ class Recorder:
                 next_tick += self.__interval
 
                 d = self.__mpu.get_avg()
+                baro_cols = ['', '', '']
+                if self.__baro is not None:
+                    try:
+                        b = self.__baro.read()
+                        baro_cols = [f'{b.Pressure:.1f}', f'{b.Temp:.2f}', f'{b.Altitude:.2f}']
+                    except OSError:
+                        pass  # transient bus error: leave the columns empty
                 writer.writerow([
                     d.T.isoformat(),
                     f'{float(d.G1):.6f}', f'{float(d.G2):.6f}', f'{float(d.G3):.6f}',
@@ -46,6 +56,7 @@ class Recorder:
                     f'{float(d.M1):.6f}', f'{float(d.M2):.6f}', f'{float(d.M3):.6f}',
                     f'{float(d.Temp):.3f}',
                     d.N, d.NM, f'{float(d.DT):.1f}', f'{float(d.DTM):.1f}',
+                    *baro_cols,
                     d.MsgError or '',
                 ])
                 self.rows += 1

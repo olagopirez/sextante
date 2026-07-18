@@ -95,6 +95,10 @@
             <b id="m0"></b><b id="m1"></b><b id="m2"></b></div>
           <div class="row"><span class="lbl">TEMP</span><span class="unit">°C</span>
             <b id="temp"></b></div>
+          <div class="row" id="row-press" hidden><span class="lbl">PRESS</span><span class="unit">hPa</span>
+            <b id="press"></b></div>
+          <div class="row" id="row-alt" hidden><span class="lbl">ALT</span><span class="unit">m</span>
+            <b id="alt"></b></div>
         </div>
       </section>
 
@@ -307,6 +311,12 @@ source.onmessage = (msg) => {
     document.getElementById('m' + i).textContent = fmt(d.m[i]);
   }
   document.getElementById('temp').textContent = fmt(d.temp);
+  if (d.press !== undefined) {
+    document.getElementById('row-press').hidden = false;
+    document.getElementById('row-alt').hidden = false;
+    document.getElementById('press').textContent = d.press.toFixed(1);
+    document.getElementById('alt').textContent = fmt(d.alt);
+  }
   for (const spark of sparks) {
     spark.buf.push(d[spark.key]);
     if (spark.buf.length > HISTORY) spark.buf.shift();

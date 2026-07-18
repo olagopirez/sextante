@@ -9,7 +9,7 @@ import math
 import time
 from datetime import datetime
 
-from .data import MPUData
+from .data import BaroData, MPUData
 from .fusion import q_conjugate, q_from_euler, q_multiply, q_rotate
 
 # Earth frame (z up): gravity specific force and a ~38 µT field with dip
@@ -87,3 +87,23 @@ class DemoMPU:
         d.DT = 1000.0 / self.__rate * d.N
         d.DTM = d.DT
         return d
+
+
+class DemoBaro:
+    """Synthetic BMP280 stand-in: a gentle altitude sway around ~12 m."""
+
+    def __init__(self, sea_level_pa=101325.0):
+        self.__t0 = time.monotonic()
+        self.sea_level_pa = float(sea_level_pa)
+        self.chip_id = 0x58
+
+    def initialize(self):
+        return self.chip_id
+
+    def read(self):
+        t = time.monotonic() - self.__t0
+        altitude = 12.0 + 4.0 * math.sin(t / 9) + 0.15 * math.sin(t * 431.7)
+        pressure = self.sea_level_pa * (1.0 - altitude / 44330.0) ** 5.255
+        temp = 24.5 + 0.2 * math.sin(t / 13)
+        return BaroData(pressure=pressure, temp=temp, altitude=altitude,
+                        t=datetime.now())

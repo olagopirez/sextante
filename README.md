@@ -20,6 +20,7 @@ The driver samples the sensor from a background thread at a configurable rate an
 - Hardware self-check on startup: verifies `WHO_AM_I` and the AK8963 device id, catching the common relabeled/magnetometer-less boards before configuring anything.
 - User calibration hooks (`MPUCalData`): hardware biases and a magnetometer rescaling matrix.
 - Session recording to CSV on the Pi and Markdown/PNG analysis reports (`sextante-record`, `sextante-report`).
+- BMP280/BME280 barometer support, auto-detected at `0x76`/`0x77`: pressure, temperature and barometric altitude (adjustable QNH), recorded, streamed and reported alongside the IMU.
 - Live motion viewing from any PC: Mahony sensor fusion on the Pi and a zero-install web viewer served by the Pi itself (`sextante-stream`).
 - Fully testable without hardware — the I2C bus is injectable, and every CLI accepts `--demo` to run on synthetic motion.
 
@@ -34,6 +35,7 @@ mpu9250/            The package
 ├── data.py         MPUData / MPUCalData value objects
 ├── ticker.py       Drift-free periodic ticker thread used by the sampling loop
 ├── fusion.py       Mahony AHRS attitude filter + quaternion helpers
+├── bmp280.py       Bosch BMP280/BME280 barometer (pressure, temperature, altitude)
 ├── recorder.py     CSV session recorder
 ├── report.py       Session analysis and Markdown/PNG report rendering
 ├── streamer.py     Sampling hub + SSE HTTP server (serves the live viewer)
@@ -151,6 +153,12 @@ filter** fusing gyro + accel + magnetometer, all in the body frame the driver re
 **Reports** summarize a recorded session: per-channel statistics, accumulated rotation
 per axis, stillness share, peak specific force, and a magnetometer health check
 (Earth's field magnitude should sit in ~25–65 µT).
+
+**Barometer**: when a BMP280/BME280 answers on the bus (the Stratux AHRS board pairs
+one with the MPU-9250), every command picks it up automatically — pressure/altitude
+columns in the CSV, `PRESS`/`ALT` in the live viewer, altitude statistics and range in
+reports. Set the sea-level pressure with `--qnh 1020.5` for true altitude, or skip the
+sensor with `--no-baro`.
 
 Every command accepts `--demo` to run against a synthetic motion source — the whole
 pipeline works on any machine, no hardware needed. Note: the recorder is the only

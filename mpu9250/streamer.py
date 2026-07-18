@@ -21,10 +21,12 @@ class StreamHub(threading.Thread):
     """Samples ``mpu.mpuDate`` at a fixed rate, runs the Mahony filter and
     keeps the latest JSON-ready payload for any number of SSE clients."""
 
-    def __init__(self, mpu, rate=50, source='mpu9250'):
+    def __init__(self, mpu, rate=50, source='mpu9250', baro=None):
         threading.Thread.__init__(self)
         self.daemon = True
         self.__mpu = mpu
+        self.__baro = baro
+        self.__baro_every = max(1, rate // 10)  # ~10 Hz is plenty for pressure
         self.__period = 1.0 / rate
         self.__stop = threading.Event()
         self.fusion = MahonyAHRS()
@@ -35,11 +37,20 @@ class StreamHub(threading.Thread):
 
     def run(self):
         prev = time.monotonic()
+        tick = 0
+        baro_data = None
         while not self.__stop.is_set():
             d = self.__mpu.mpuDate
             now = time.monotonic()
             dt = min(max(now - prev, 1e-4), 0.2)
             prev = now
+
+            if self.__baro is not None and tick % self.__baro_every == 0:
+                try:
+                    baro_data = self.__baro.read()
+                except OSError:
+                    pass  # transient bus error: keep the previous reading
+            tick += 1
 
             mag_ok = d.NM > 0 and not (d.M1 == 0 and d.M2 == 0 and d.M3 == 0)
             q = self.fusion.update(
@@ -62,6 +73,10 @@ class StreamHub(threading.Thread):
                 'q': [round(c, 5) for c in q],
                 'e': [round(roll / DEG, 2), round(pitch / DEG, 2), round(yaw / DEG, 2)],
             }
+            if baro_data is not None:
+                payload['press'] = round(baro_data.Pressure / 100.0, 2)  # hPa
+                payload['alt'] = round(baro_data.Altitude, 2)
+                payload['btemp'] = round(baro_data.Temp, 2)
             with self.__lock:
                 self.latest = payload
             self.__stop.wait(self.__period)
@@ -120,9 +135,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.__send(404, 'text/plain', b'not found')
 
 
-def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250'):
+def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None):
     """Starts the sampling hub and returns (httpd, hub); caller serves/shuts down."""
-    hub = StreamHub(mpu, rate=rate, source=source)
+    hub = StreamHub(mpu, rate=rate, source=source, baro=baro)
     hub.start()
 
     handler = type('Handler', (_Handler,), {'hub': hub, 'stream_period': 1.0 / stream_rate})
@@ -131,9 +146,9 @@ def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, sourc
     return httpd, hub
 
 
-def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250'):
+def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None):
     """Blocks serving the viewer and the SSE stream until interrupted."""
-    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source)
+    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source, baro=baro)
     try:
         httpd.serve_forever()
     finally:
