@@ -21,11 +21,12 @@ class StreamHub(threading.Thread):
     """Samples ``mpu.mpuDate`` at a fixed rate, runs the Mahony filter and
     keeps the latest JSON-ready payload for any number of SSE clients."""
 
-    def __init__(self, mpu, rate=50, source='mpu9250', baro=None, fix_az=0):
+    def __init__(self, mpu, rate=50, source='mpu9250', baro=None, fix_az=0, gps=None):
         threading.Thread.__init__(self)
         self.daemon = True
         self.__mpu = mpu
         self.__baro = baro
+        self.__gps = gps
         self.__fix_az = fix_az  # 0 = off; ±1 = sign of a healthy vertical axis
         self.__baro_every = max(1, rate // 10)  # ~10 Hz is plenty for pressure
         self.__period = 1.0 / rate
@@ -81,6 +82,17 @@ class StreamHub(threading.Thread):
                 payload['press'] = round(baro_data.Pressure / 100.0, 2)  # hPa
                 payload['alt'] = round(baro_data.Altitude, 2)
                 payload['btemp'] = round(baro_data.Temp, 2)
+            if self.__gps is not None:
+                gfix = self.__gps.snapshot()
+                if gfix is not None:
+                    payload['fix'] = 1 if gfix.Fix else 0
+                    payload['sats'] = gfix.Sats
+                    if gfix.Fix and gfix.Lat is not None:
+                        payload['lat'] = round(gfix.Lat, 6)
+                        payload['lon'] = round(gfix.Lon, 6)
+                        payload['spd'] = round(gfix.SpeedKmh, 1)
+                        payload['crs'] = round(gfix.Course, 1)
+                        payload['galt'] = round(gfix.Altitude, 1)
             with self.__lock:
                 self.latest = payload
             self.__stop.wait(self.__period)
@@ -139,9 +151,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.__send(404, 'text/plain', b'not found')
 
 
-def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None, fix_az=0):
+def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None, fix_az=0, gps=None):
     """Starts the sampling hub and returns (httpd, hub); caller serves/shuts down."""
-    hub = StreamHub(mpu, rate=rate, source=source, baro=baro, fix_az=fix_az)
+    hub = StreamHub(mpu, rate=rate, source=source, baro=baro, fix_az=fix_az, gps=gps)
     hub.start()
 
     handler = type('Handler', (_Handler,), {'hub': hub, 'stream_period': 1.0 / stream_rate})
@@ -150,9 +162,9 @@ def create_server(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, sourc
     return httpd, hub
 
 
-def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None, fix_az=0):
+def serve(mpu, host='0.0.0.0', port=8000, rate=50, stream_rate=30, source='mpu9250', baro=None, fix_az=0, gps=None):
     """Blocks serving the viewer and the SSE stream until interrupted."""
-    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source, baro=baro, fix_az=fix_az)
+    httpd, hub = create_server(mpu, host, port, rate, stream_rate, source, baro=baro, fix_az=fix_az, gps=gps)
     try:
         httpd.serve_forever()
     finally:

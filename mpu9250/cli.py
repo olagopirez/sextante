@@ -27,6 +27,12 @@ def _add_source_args(parser):
     parser.add_argument('--calibrate', type=float, default=2.0, metavar='SECONDS',
                         help='measure gyro bias at startup with the device still '
                              '(default 2.0; use 0 to skip)')
+    parser.add_argument('--gps', action='store_true',
+                        help='read a serial NMEA GPS (BerryGPS-IMU) alongside the IMU')
+    parser.add_argument('--gps-device', default='/dev/serial0', metavar='PATH',
+                        help='GPS serial device (default /dev/serial0)')
+    parser.add_argument('--gps-baud', type=int, default=9600,
+                        help='GPS baud rate (default 9600)')
     parser.add_argument('--mount', default=None, metavar='SPEC',
                         help="mounting correction as quarter turns, e.g. 'x180' when the "
                              "chip sits upside down (Stratux AHRS), or 'x180,z90'")
@@ -37,8 +43,9 @@ def _make_source(args):
         from .demo import DemoBaro, DemoMPU
         mpu = DemoMPU(rate=args.rate)
         mpu.initialize()
+        from .demo import DemoGPS
         baro = None if args.no_baro else DemoBaro(sea_level_pa=args.qnh * 100.0)
-        return mpu, baro, 'demo'
+        return mpu, baro, DemoGPS(), 'demo'
 
     import smbus2
     bus = smbus2.SMBus(1)
@@ -76,7 +83,14 @@ def _make_source(args):
         except (HardwareMismatchError, OSError) as exc:
             print(f'barometer: none ({exc})')
             baro = None
-    return mpu, baro, kind
+
+    gps = None
+    if args.gps:
+        from .gps import GPS
+        gps = GPS(device=args.gps_device, baud=args.gps_baud)
+        gps.start()
+        print(f'gps: reading NMEA from {args.gps_device} @ {args.gps_baud}')
+    return mpu, baro, gps, kind
 
 
 def record_main(argv=None):
@@ -94,11 +108,11 @@ def record_main(argv=None):
 
     from .recorder import Recorder
     path = args.out or datetime.now().strftime('sextante-%Y%m%d-%H%M%S.csv')
-    mpu, baro, source = _make_source(args)
+    mpu, baro, gps, source = _make_source(args)
     print(f'recording {source} @ {args.rate} Hz -> {path} '
           f'(one row every {args.interval:g}s; Ctrl-C to stop)')
 
-    recorder = Recorder(mpu, path, interval=args.interval, baro=baro)
+    recorder = Recorder(mpu, path, interval=args.interval, baro=baro, gps=gps)
     recorder.start()
     try:
         if args.duration:
@@ -132,12 +146,12 @@ def stream_main(argv=None):
     args = parser.parse_args(argv)
 
     from .streamer import serve
-    mpu, baro, source = _make_source(args)
+    mpu, baro, gps, source = _make_source(args)
 
     recorder = None
     if args.record:
         from .recorder import Recorder
-        recorder = Recorder(mpu, args.record, interval=0.2, baro=baro).start()
+        recorder = Recorder(mpu, args.record, interval=0.2, baro=baro, gps=gps).start()
         print(f'recording to {args.record}')
 
     print(f'streaming {source} on http://{args.host}:{args.port}/  (Ctrl-C to stop)')
@@ -147,7 +161,7 @@ def stream_main(argv=None):
         if fix_az:
             print('accel Z reconstruction enabled (attitude only)')
         serve(mpu, host=args.host, port=args.port, rate=args.rate,
-              stream_rate=args.stream_rate, source=source, baro=baro, fix_az=fix_az)
+              stream_rate=args.stream_rate, source=source, baro=baro, fix_az=fix_az, gps=gps)
     except KeyboardInterrupt:
         pass
     finally:

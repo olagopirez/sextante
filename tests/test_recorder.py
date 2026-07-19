@@ -79,3 +79,26 @@ class TestRecorder:
         assert first['press_pa'] == ''
         assert first['alt_m'] == ''
         assert first['error'] == ''
+
+    def test_records_gps_columns_when_attached(self, tmp_path):
+        from mpu9250 import GPSData
+
+        class StubGPS:
+            def snapshot(self):
+                return GPSData(lat=42.880600, lon=-9.271100, speed_kmh=4.75,
+                               course=90.0, sats=9, hdop=0.9, altitude=63.0, fix=True)
+
+        path = tmp_path / 'gps.csv'
+        with Recorder(StubMPU(), path, interval=0.05, gps=StubGPS()) as recorder:
+            time.sleep(0.15)
+        assert recorder.rows >= 1
+
+        with open(path, newline='') as fh:
+            rows = list(csv.reader(fh))
+        first = dict(zip(FIELDS, rows[1]))
+        assert float(first['lat']) == 42.8806
+        assert float(first['lon']) == -9.2711
+        assert float(first['speed_kmh']) == 4.75
+        assert first['sats'] == '9'
+        assert first['gps_fix'] == '1'
+        assert first['error'] == ''

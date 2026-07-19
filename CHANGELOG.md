@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - LSM9DS1 driver (`lsm9ds1.py`) for Ozzmaker BerryGPS-IMU boards: same reading surface as `MPU9250` (`mpuDate`, `get_avg()`, `self_check()`, `calibrate_gyro()`, `mount=`), so the entire pipeline — recorder, fusion, streamer, viewer, reports — runs unchanged on either chip. Fixed profile: gyro 245 dps @ 119 Hz, accel ±2 g, mag ±4 gauss continuous 80 Hz with the die's mirrored X axis un-mirrored into the accel/gyro frame. The CLI auto-detects the chip (`--imu auto`, default) by probing WHO_AM_I at 0x68 and 0x6A.
 
+- Serial NMEA GPS support (`gps.py`, CLI `--gps`/`--gps-device`/`--gps-baud`): pure-stdlib termios serial reader and checksum-validated RMC/GGA parser for the BerryGPS-IMU's uBlox. Position/speed/course/satellites flow into the SSE stream and viewer (`GPS`/`POS`/`SPD` rows), CSV columns, and reports (track distance via haversine, max speed); `DemoGPS` walks a synthetic circle for hardware-free runs.
+
 ### Changed
 - The AK8963 now runs in **continuous measurement mode (100 Hz, 16-bit)** instead of per-sample single-measurement retriggering. 16-bit output matches the driver's 0.15 µT/LSB scale — the old 14-bit mode under-reported the field by 4×.
 - Magnetometer samples are validated against the real status registers: skipped unless `ST1.DRDY` is set, and discarded on `ST2.HOFL` magnetic overflow (replaces the vestigial checks inherited from the Go port).

@@ -23,6 +23,7 @@ The driver samples the sensor from a background thread at a configurable rate an
 - BMP280/BME280 barometer support, auto-detected at `0x76`/`0x77`: pressure, temperature and barometric altitude (adjustable QNH), recorded, streamed and reported alongside the IMU.
 - Live motion viewing from any PC: Mahony sensor fusion on the Pi and a zero-install web viewer served by the Pi itself (`sextante-stream`).
 - Two supported IMUs behind one reading surface: `MPU9250` and `LSM9DS1` (BerryGPS-IMU); the CLI auto-detects which one answers on the bus (`--imu auto`).
+- Serial NMEA GPS support (`--gps`, BerryGPS-IMU's uBlox): position, speed, course and satellites in the live viewer and CSVs; distance and max speed in reports. Pure stdlib parser, checksum-validated.
 - Fully testable without hardware — the I2C bus is injectable, and every CLI accepts `--demo` to run on synthetic motion.
 
 ## Project layout
@@ -39,6 +40,7 @@ mpu9250/            The package
 ├── ticker.py       Drift-free periodic ticker thread used by the sampling loop
 ├── fusion.py       Mahony AHRS attitude filter + quaternion helpers
 ├── bmp280.py       Bosch BMP280/BME280 barometer (pressure, temperature, altitude)
+├── gps.py          Serial NMEA GPS reader (uBlox on BerryGPS-IMU boards)
 ├── recorder.py     CSV session recorder
 ├── report.py       Session analysis and Markdown/PNG report rendering
 ├── streamer.py     Sampling hub + SSE HTTP server (serves the live viewer)
@@ -156,6 +158,12 @@ filter** fusing gyro + accel + magnetometer, all in the body frame the driver re
 **Reports** summarize a recorded session: per-channel statistics, accumulated rotation
 per axis, stillness share, peak specific force, and a magnetometer health check
 (Earth's field magnitude should sit in ~25–65 µT).
+
+**GPS** (BerryGPS-IMU): add `--gps` to any command to read the on-board uBlox over
+serial NMEA — `POS`/`SPD`/`GPS` rows appear in the viewer, position columns in the
+CSV, and reports gain track distance and max speed. On the Pi, free the UART first:
+`sudo raspi-config nonint do_serial_cons 1 && sudo raspi-config nonint do_serial_hw 0`
+(console off, port on), then reboot; tune with `--gps-device`/`--gps-baud`.
 
 **Gyro calibration**: MEMS gyros always show a constant per-axis bias (~1 °/s) that
 makes the attitude wander at rest. Every command measures and removes it at startup —

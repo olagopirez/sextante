@@ -110,3 +110,35 @@ class DemoBaro:
         temp = 24.5 + 0.2 * math.sin(t / 13)
         return BaroData(pressure=pressure, temp=temp, altitude=altitude,
                         t=datetime.now())
+
+
+class DemoGPS:
+    """Synthetic GPS: a slow walk in a ~50 m circle off Cape Finisterre."""
+
+    LAT0, LON0 = 42.8806, -9.2711
+
+    def __init__(self):
+        self.__t0 = time.monotonic()
+
+    def start(self):
+        return self
+
+    def stop(self):
+        pass
+
+    def snapshot(self):
+        from .data import GPSData
+        t = time.monotonic() - self.__t0
+        angle = t * (2 * math.pi / 240)  # one lap every 4 minutes
+        radius = 0.00045                 # ~50 m in degrees of latitude
+        lat = self.LAT0 + radius * math.sin(angle)
+        lon = self.LON0 + radius * math.cos(angle) / math.cos(math.radians(self.LAT0))
+        return GPSData(
+            lat=lat, lon=lon,
+            speed_kmh=4.7 + 0.2 * math.sin(t * 1.3),
+            course=(90.0 - math.degrees(angle)) % 360.0,
+            sats=9, hdop=0.9,
+            altitude=63.0 + 0.5 * math.sin(t / 7),
+            fix=True,
+            t=datetime.now(),
+        )

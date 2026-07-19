@@ -2,10 +2,11 @@
 recording/streaming/reporting pipeline that runs on either chip."""
 
 from .bmp280 import BMP280
-from .data import BaroData, MPUCalData, MPUData
-from .demo import DemoBaro, DemoMPU
+from .data import BaroData, GPSData, MPUCalData, MPUData
+from .demo import DemoBaro, DemoGPS, DemoMPU
 from .driver import MPU9250, HardwareMismatchError
 from .fusion import MahonyAHRS
+from .gps import GPS
 from .lsm9ds1 import LSM9DS1
 from .ranges import AccelRange, GyroRange, LPF
 from .recorder import Recorder
@@ -27,4 +28,7 @@ __all__ = [
     'Recorder',
     'DemoMPU',
     'DemoBaro',
+    'DemoGPS',
+    'GPS',
+    'GPSData',
 ]

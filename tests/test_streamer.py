@@ -138,3 +138,27 @@ class TestFixAz:
 
     def test_without_it_the_dead_axis_drags_the_attitude_away(self):
         assert self._attitude_error(fix_az=0) > math.radians(25)
+
+
+class TestStreamHubGPS:
+    def test_payload_includes_gps_when_attached(self):
+        from mpu9250.demo import DemoGPS
+        hub = StreamHub(DemoMPU(), rate=100, source='demo', gps=DemoGPS())
+        hub.start()
+        time.sleep(0.3)
+        hub.stop()
+
+        payload = hub.snapshot()
+        assert payload['fix'] == 1
+        assert payload['sats'] == 9
+        assert payload['lat'] == pytest.approx(42.88, abs=0.01)
+        assert payload['lon'] == pytest.approx(-9.27, abs=0.01)
+        assert 3 < payload['spd'] < 7
+
+    def test_payload_has_no_gps_keys_without_one(self):
+        hub = StreamHub(DemoMPU(), rate=100, source='demo')
+        hub.start()
+        time.sleep(0.2)
+        hub.stop()
+
+        assert 'fix' not in hub.snapshot()

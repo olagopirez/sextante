@@ -6,7 +6,8 @@ import time
 
 FIELDS = ['timestamp', 'g1', 'g2', 'g3', 'a1', 'a2', 'a3',
           'm1', 'm2', 'm3', 'temp', 'n', 'nm', 'dt_ms', 'dtm_ms',
-          'press_pa', 'baro_temp', 'alt_m', 'error']
+          'press_pa', 'baro_temp', 'alt_m',
+          'lat', 'lon', 'speed_kmh', 'course', 'sats', 'gps_fix', 'gps_alt_m', 'error']
 
 
 class Recorder:
@@ -19,9 +20,10 @@ class Recorder:
     does not interfere.
     """
 
-    def __init__(self, mpu, path, interval=0.2, baro=None):
+    def __init__(self, mpu, path, interval=0.2, baro=None, gps=None):
         self.__mpu = mpu
         self.__baro = baro
+        self.__gps = gps
         self.__path = path
         self.__interval = float(interval)
         self.__stop = threading.Event()
@@ -42,6 +44,18 @@ class Recorder:
                 next_tick += self.__interval
 
                 d = self.__mpu.get_avg()
+                gps_cols = ['', '', '', '', '', '', '']
+                if self.__gps is not None:
+                    s = self.__gps.snapshot()
+                    if s is not None:
+                        gps_cols[4] = str(s.Sats)
+                        gps_cols[5] = '1' if s.Fix else '0'
+                        if s.Fix and s.Lat is not None:
+                            gps_cols[0] = f'{s.Lat:.6f}'
+                            gps_cols[1] = f'{s.Lon:.6f}'
+                            gps_cols[2] = f'{s.SpeedKmh:.2f}'
+                            gps_cols[3] = f'{s.Course:.1f}'
+                            gps_cols[6] = f'{s.Altitude:.1f}'
                 baro_cols = ['', '', '']
                 if self.__baro is not None:
                     try:
@@ -57,6 +71,7 @@ class Recorder:
                     f'{float(d.Temp):.3f}',
                     d.N, d.NM, f'{float(d.DT):.1f}', f'{float(d.DTM):.1f}',
                     *baro_cols,
+                    *gps_cols,
                     d.MsgError or '',
                 ])
                 self.rows += 1
