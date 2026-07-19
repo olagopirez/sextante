@@ -6,7 +6,7 @@
 
 *Sextante* — Spanish for **sextant**, the classic instrument for finding your attitude and heading from the sky.
 
-Python driver for the InvenSense **MPU-9250** 9-axis IMU — 3-axis accelerometer, 3-axis gyroscope and on-board **AK8963** 3-axis magnetometer — read over I2C, designed for the Raspberry Pi.
+Python drivers for 9-axis IMUs over I2C on the Raspberry Pi — the InvenSense **MPU-9250** (accel + gyro + AK8963 magnetometer, e.g. the Stratux AHRS board) and the ST **LSM9DS1** (e.g. the Ozzmaker BerryGPS-IMU) — with a shared recording, live-viewing and reporting pipeline on top.
 
 The driver samples the sensor from a background thread at a configurable rate and lets you pull instantaneous readings or per-interval averages. The importable package keeps the hardware's name: `import mpu9250`.
 
@@ -22,6 +22,7 @@ The driver samples the sensor from a background thread at a configurable rate an
 - Session recording to CSV on the Pi and Markdown/PNG analysis reports (`sextante-record`, `sextante-report`).
 - BMP280/BME280 barometer support, auto-detected at `0x76`/`0x77`: pressure, temperature and barometric altitude (adjustable QNH), recorded, streamed and reported alongside the IMU.
 - Live motion viewing from any PC: Mahony sensor fusion on the Pi and a zero-install web viewer served by the Pi itself (`sextante-stream`).
+- Two supported IMUs behind one reading surface: `MPU9250` and `LSM9DS1` (BerryGPS-IMU); the CLI auto-detects which one answers on the bus (`--imu auto`).
 - Fully testable without hardware — the I2C bus is injectable, and every CLI accepts `--demo` to run on synthetic motion.
 
 ## Project layout
@@ -30,6 +31,8 @@ The driver samples the sensor from a background thread at a configurable rate an
 mpu9250/            The package
 ├── __init__.py     Public API (MPU9250, MPUData, MPUCalData, ranges, MahonyAHRS, Recorder, DemoMPU)
 ├── driver.py       MPU9250 class: chip setup, sampling loop, averaging
+├── lsm9ds1.py      LSM9DS1 driver (BerryGPS-IMU): same reading surface as MPU9250
+├── detect.py       IMU auto-detection (which supported chip answers on the bus)
 ├── constants.py    Register map and configuration bits (MPU-9250 + AK8963)
 ├── ranges.py       Accel/gyro range definitions and LPF selection
 ├── data.py         MPUData / MPUCalData value objects

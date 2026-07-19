@@ -13,8 +13,11 @@ def _add_source_args(parser):
                         help='use a synthetic motion source instead of hardware')
     parser.add_argument('--skip-check', action='store_true',
                         help='skip the WHO_AM_I/WIA hardware self-check')
+    parser.add_argument('--imu', choices=['auto', 'mpu9250', 'lsm9ds1'], default='auto',
+                        help='IMU chip: mpu9250 (Stratux AHRS), lsm9ds1 (BerryGPS-IMU), '
+                             'or auto-detect on the bus (default)')
     parser.add_argument('--address', type=lambda v: int(v, 0), default=None,
-                        help='I2C address (default 0x68; use 0x69 with AD0 high)')
+                        help='IMU I2C address (default: 0x68 for mpu9250, 0x6A for lsm9ds1)')
     parser.add_argument('--no-baro', action='store_true',
                         help='do not look for a BMP280 barometer')
     parser.add_argument('--baro-address', type=lambda v: int(v, 0), default=None,
@@ -37,9 +40,24 @@ def _make_source(args):
         baro = None if args.no_baro else DemoBaro(sea_level_pa=args.qnh * 100.0)
         return mpu, baro, 'demo'
 
-    from .constants import MPU_ADDRESS
-    from .driver import MPU9250
-    mpu = MPU9250(address=args.address or MPU_ADDRESS, rate=args.rate, mount=args.mount)
+    import smbus2
+    bus = smbus2.SMBus(1)
+
+    kind = args.imu
+    if kind == 'auto':
+        from .detect import detect_imu
+        kind = detect_imu(bus)
+        print(f'imu: {kind} detected')
+
+    if kind == 'lsm9ds1':
+        from .lsm9ds1 import LSM9DS1, LSM9DS1_AG_ADDRESS
+        mpu = LSM9DS1(ag_address=args.address or LSM9DS1_AG_ADDRESS,
+                      rate=args.rate, bus=bus, mount=args.mount)
+    else:
+        from .constants import MPU_ADDRESS
+        from .driver import MPU9250
+        mpu = MPU9250(address=args.address or MPU_ADDRESS, rate=args.rate,
+                      bus=bus, mount=args.mount)
     mpu.initialize(check_hardware=not args.skip_check)
 
     if args.calibrate > 0:
@@ -52,13 +70,13 @@ def _make_source(args):
         from .bmp280 import BMP280
         from .driver import HardwareMismatchError
         try:
-            baro = BMP280(address=args.baro_address, sea_level_pa=args.qnh * 100.0)
+            baro = BMP280(address=args.baro_address, bus=bus, sea_level_pa=args.qnh * 100.0)
             chip_id = baro.initialize()
             print(f'barometer: {"BME280" if chip_id == 0x60 else "BMP280"} found')
         except (HardwareMismatchError, OSError) as exc:
             print(f'barometer: none ({exc})')
             baro = None
-    return mpu, baro, 'mpu9250'
+    return mpu, baro, kind
 
 
 def record_main(argv=None):
