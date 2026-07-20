@@ -120,12 +120,13 @@ class GPSData:
     """One GPS state: position (°), speed (km/h), course (°), fix info."""
 
     def __init__(self, lat=None, lon=None, speed_kmh=0.0, course=0.0,
-                 sats=0, hdop=0.0, altitude=0.0, fix=False, t=None):
+                 sats=0, sats_view=0, hdop=0.0, altitude=0.0, fix=False, t=None):
         self.Lat = lat
         self.Lon = lon
         self.SpeedKmh = speed_kmh
         self.Course = course
         self.Sats = sats
+        self.SatsView = sats_view
         self.Hdop = hdop
         self.Altitude = altitude
         self.Fix = fix
@@ -138,6 +139,7 @@ class GPSData:
             'SpeedKmh': self.SpeedKmh,
             'Course': self.Course,
             'Sats': self.Sats,
+            'SatsView': self.SatsView,
             'Hdop': self.Hdop,
             'Altitude': self.Altitude,
             'Fix': self.Fix,

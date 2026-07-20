@@ -2,7 +2,7 @@
 
 Pure standard library: the serial port is configured with ``termios`` and the
 NMEA sentences (RMC for position/speed/course, GGA for fix quality/satellites/
-altitude) are parsed by hand, checksum-validated. A daemon thread keeps the
+altitude, GSV for satellites in view) are parsed by hand, checksum-validated. A daemon thread keeps the
 latest merged state; consumers call ``snapshot()``.
 """
 
@@ -80,6 +80,7 @@ class GPS(threading.Thread):
         self.__speed_kmh = 0.0
         self.__course = 0.0
         self.__sats = 0
+        self.__view = {}  # satellites in view, per constellation talker
         self.__hdop = 0.0
         self.__altitude = 0.0
         self.__fix = False
@@ -122,6 +123,12 @@ class GPS(threading.Thread):
                 self.__hdop = float(parts[8]) if parts[8] else 0.0
                 self.__altitude = float(parts[9]) if parts[9] else 0.0
                 self.__has_data = True
+        elif kind == 'GSV' and len(parts) >= 4:
+            # GGA only counts satellites USED in the fix (0 until lock); GSV
+            # shows what the antenna actually sees, per constellation
+            with self.__lock:
+                self.__view[parts[0][:2]] = int(parts[3]) if parts[3] else 0
+                self.__has_data = True
 
     def snapshot(self):
         """Returns the latest merged GPSData, or None before any sentence."""
@@ -130,7 +137,8 @@ class GPS(threading.Thread):
                 return None
             return GPSData(lat=self.__lat, lon=self.__lon,
                            speed_kmh=self.__speed_kmh, course=self.__course,
-                           sats=self.__sats, hdop=self.__hdop,
+                           sats=self.__sats, sats_view=sum(self.__view.values()),
+                           hdop=self.__hdop,
                            altitude=self.__altitude, fix=self.__fix,
                            t=datetime.now())
 

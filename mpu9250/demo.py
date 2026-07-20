@@ -137,7 +137,7 @@ class DemoGPS:
             lat=lat, lon=lon,
             speed_kmh=4.7 + 0.2 * math.sin(t * 1.3),
             course=(90.0 - math.degrees(angle)) % 360.0,
-            sats=9, hdop=0.9,
+            sats=9, sats_view=12, hdop=0.9,
             altitude=63.0 + 0.5 * math.sin(t / 7),
             fix=True,
             t=datetime.now(),
