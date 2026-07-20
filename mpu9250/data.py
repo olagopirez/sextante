@@ -114,3 +114,32 @@ class BaroData:
             'Altitude': self.Altitude,
             'T': self.T,
         }
+
+
+class GPSData:
+    """One GPS state: position (°), speed (km/h), course (°), fix info."""
+
+    def __init__(self, lat=None, lon=None, speed_kmh=0.0, course=0.0,
+                 sats=0, hdop=0.0, altitude=0.0, fix=False, t=None):
+        self.Lat = lat
+        self.Lon = lon
+        self.SpeedKmh = speed_kmh
+        self.Course = course
+        self.Sats = sats
+        self.Hdop = hdop
+        self.Altitude = altitude
+        self.Fix = fix
+        self.T = t if t is not None else dtime.now()
+
+    def get_json(self):
+        return {
+            'Lat': self.Lat,
+            'Lon': self.Lon,
+            'SpeedKmh': self.SpeedKmh,
+            'Course': self.Course,
+            'Sats': self.Sats,
+            'Hdop': self.Hdop,
+            'Altitude': self.Altitude,
+            'Fix': self.Fix,
+            'T': self.T,
+        }

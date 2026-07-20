@@ -95,3 +95,34 @@ class TestBaroSession:
         md = render_markdown('s.csv', session, a)
         assert 'Pressure' not in md
         assert 'Altitude range' not in md
+
+
+CSV_GPS = """timestamp,g1,g2,g3,a1,a2,a3,m1,m2,m3,temp,n,nm,dt_ms,dtm_ms,lat,lon,speed_kmh,course,sats,gps_fix,gps_alt_m,error
+2026-07-19T12:00:00,0.0,0.0,0.0,0.0,0.0,1.0,22.0,0.0,-31.0,36.0,10,5,1000.0,1000.0,42.880600,-9.271100,4.00,90.0,9,1,63.0,
+2026-07-19T12:00:01,0.0,0.0,0.0,0.0,0.0,1.0,22.0,0.0,-31.0,36.0,10,5,1000.0,1000.0,42.880600,-9.269878,6.00,90.0,9,1,63.2,
+2026-07-19T12:00:02,0.0,0.0,0.0,0.0,0.0,1.0,22.0,0.0,-31.0,36.0,10,5,1000.0,1000.0,42.881499,-9.269878,5.00,0.0,10,1,63.4,
+"""
+
+
+class TestGPSSession:
+    def test_track_metrics(self, tmp_path):
+        path = tmp_path / 'gps.csv'
+        path.write_text(CSV_GPS)
+        session = load_session(path)
+        a = analyze(session)
+
+        # leg 1: ~100 m east; leg 2: ~100 m north
+        assert a['gps_distance_m'] == pytest.approx(200.0, abs=5.0)
+        assert a['gps_max_kmh'] == pytest.approx(6.0)
+        assert a['channels']['speed_kmh']['mean'] == pytest.approx(5.0)
+
+        md = render_markdown(path, session, a)
+        assert '| GPS distance |' in md
+        assert 'GPS max speed | 6.0 km/h' in md
+
+    def test_sessions_without_gps_have_no_gps_rows(self, session):
+        a = analyze(session)
+
+        assert 'gps_distance_m' not in a
+        md = render_markdown('s.csv', session, a)
+        assert 'GPS distance' not in md

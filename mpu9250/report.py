@@ -18,6 +18,23 @@ _BARO_CHANNELS = [
     ('alt_m', 'Altitude', 'm', 1),
 ]
 
+# Present only in sessions recorded with a GPS attached
+_GPS_CHANNELS = [
+    ('speed_kmh', 'GPS speed', 'km/h', 1),
+    ('sats', 'Satellites', 'sats', 1),
+    ('gps_alt_m', 'GPS altitude', 'm', 1),
+]
+
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    """Great-circle distance between two points, in meters."""
+    r_earth = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r_earth * math.asin(math.sqrt(a))
+
 STILL_GYRO_DPS = 1.5  # below this on every axis, the device counts as still
 
 
@@ -64,7 +81,7 @@ def analyze(session):
     rows = len(ts)
 
     channels = {}
-    for key, _, _, scale in _CHANNELS + _BARO_CHANNELS:
+    for key, _, _, scale in _CHANNELS + _BARO_CHANNELS + _GPS_CHANNELS:
         values = [v * scale for v in session.get(key, []) if v is not None]
         if values:
             channels[key] = _stats(values)
@@ -107,6 +124,16 @@ def analyze(session):
         result['alt_min_m'] = min(alts)
         result['alt_max_m'] = max(alts)
 
+    # Track metrics, when a GPS was recorded
+    points = [(la, lo) for la, lo in zip(session.get('lat', []), session.get('lon', []))
+              if la is not None and lo is not None]
+    if len(points) >= 2:
+        result['gps_distance_m'] = sum(
+            _haversine_m(*points[i - 1], *points[i]) for i in range(1, len(points)))
+    speeds = [v for v in session.get('speed_kmh', []) if v is not None]
+    if speeds:
+        result['gps_max_kmh'] = max(speeds)
+
     return result
 
 
@@ -133,7 +160,7 @@ def render_markdown(path, session, analysis):
         '| Channel | Unit | Mean | Std | Min | Max | RMS |',
         '|---------|------|------|-----|-----|-----|-----|',
     ]
-    for key, label, unit, _ in _CHANNELS + _BARO_CHANNELS:
+    for key, label, unit, _ in _CHANNELS + _BARO_CHANNELS + _GPS_CHANNELS:
         if key not in a['channels']:
             continue
         s = a['channels'][key]
@@ -158,6 +185,10 @@ def render_markdown(path, session, analysis):
         span = a['alt_max_m'] - a['alt_min_m']
         lines.append(
             f"| Altitude range | {a['alt_min_m']:.1f} – {a['alt_max_m']:.1f} m (Δ {span:.1f} m) |")
+    if 'gps_distance_m' in a:
+        lines.append(f"| GPS distance | {a['gps_distance_m']:.1f} m |")
+    if 'gps_max_kmh' in a:
+        lines.append(f"| GPS max speed | {a['gps_max_kmh']:.1f} km/h |")
     lines.append('')
     return '\n'.join(lines)
 
