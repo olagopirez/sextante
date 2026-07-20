@@ -87,6 +87,7 @@ class StreamHub(threading.Thread):
                 if gfix is not None:
                     payload['fix'] = 1 if gfix.Fix else 0
                     payload['sats'] = gfix.Sats
+                    payload['satv'] = gfix.SatsView
                     if gfix.Fix and gfix.Lat is not None:
                         payload['lat'] = round(gfix.Lat, 6)
                         payload['lon'] = round(gfix.Lon, 6)

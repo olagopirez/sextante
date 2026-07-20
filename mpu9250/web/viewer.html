@@ -328,7 +328,7 @@ source.onmessage = (msg) => {
   if (d.fix !== undefined) {
     document.getElementById('row-gps').hidden = false;
     document.getElementById('gpsfix').textContent =
-      (d.fix ? 'FIX' : 'NO FIX') + ' · ' + d.sats + ' SAT';
+      (d.fix ? 'FIX' : 'NO FIX') + ' · ' + d.sats + '/' + (d.satv ?? 0) + ' SAT';
     const hasPos = d.lat !== undefined;
     document.getElementById('row-pos').hidden = !hasPos;
     document.getElementById('row-spd').hidden = !hasPos;

@@ -94,3 +94,21 @@ class TestDemoGPS:
         assert 3 < a.SpeedKmh < 7
         assert 0 <= a.Course < 360
         assert (a.Lat, a.Lon) != (b.Lat, b.Lon)  # it moves
+
+
+class TestSatellitesInView:
+    def test_gsv_counts_what_the_antenna_sees(self):
+        gps = GPS()
+        gps._process_line(nmea('GPGSV,3,1,11,03,03,111,00,04,15,270,00,06,01,010,00,13,06,292,00'))
+        gps._process_line(nmea('GLGSV,2,1,07,65,60,120,30,66,30,050,28,72,10,300,,73,05,020,'))
+
+        s = gps.snapshot()
+        assert s.SatsView == 18  # 11 GPS + 7 GLONASS in view
+        assert s.Sats == 0       # none used yet: still NO FIX
+
+    def test_gsv_updates_replace_per_constellation(self):
+        gps = GPS()
+        gps._process_line(nmea('GPGSV,3,1,11,03,03,111,00'))
+        gps._process_line(nmea('GPGSV,3,1,08,03,03,111,00'))
+
+        assert gps.snapshot().SatsView == 8
